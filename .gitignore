@@ -1,0 +1,31 @@
+# .NET
+bin/
+obj/
+artifacts/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Rider
+.idea/
+
+# VS Code
+.vscode/
+
+# Build output
+dist/
+out/
+
+# Generated icon packs
+*.otphicons
+
+# Temporary downloaded source packs
+sources/
+temp/
+tmp/
+
+# OS
+Thumbs.db
+.DS_Store

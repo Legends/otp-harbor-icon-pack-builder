@@ -453,7 +453,7 @@ public static class CliApplication
         writer.WriteLine("Options:");
         writer.WriteLine("  --output <path>              Output directory or .otphicons file");
         writer.WriteLine("  --offline                    Use only local overrides and validated cache entries");
-        writer.WriteLine("  --refresh                    Redownload the currently resolved upstream versions");
+        writer.WriteLine("  --refresh                    Redownload this release's pinned upstream sources");
         writer.WriteLine("  --non-interactive            Never prompt");
         writer.WriteLine("  --force                      Replace an existing output");
         writer.WriteLine("  --cache <directory>          Override the platform cache location");

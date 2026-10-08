@@ -57,6 +57,7 @@ Automatic icon lookup uses the mandatory TOTP `issuer` value. The optional accou
    - Stable normalization.
    - Same inputs and mapping files should produce byte-equivalent metadata where practical.
    - Avoid timestamps inside content that is intended to be deterministic unless explicitly required.
+   - Treat "latest supported" as a tested, source-controlled version or commit pin for each builder release, never a moving upstream target at runtime.
 
 ## Technology
 

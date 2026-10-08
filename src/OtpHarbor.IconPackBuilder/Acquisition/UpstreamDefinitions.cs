@@ -17,69 +17,47 @@ public sealed record ResolvedUpstream(
 public interface IUpstreamDefinition
 {
     string Id { get; }
-    Task<ResolvedUpstream> ResolveLatestAsync(IRemoteContentClient client, CancellationToken cancellationToken);
+    Task<ResolvedUpstream> ResolveSupportedAsync(IRemoteContentClient client, CancellationToken cancellationToken);
     Task CreateSourceArchiveAsync(ResolvedUpstream source, string destinationPath, IRemoteContentClient client, CancellationToken cancellationToken);
 }
 
-public abstract class GitHubReleaseDefinition(string id, string repository, string? assetName) : IUpstreamDefinition
+public abstract class GitHubPinnedReleaseDefinition(
+    string id,
+    string repository,
+    string supportedVersion,
+    string? assetName) : IUpstreamDefinition
 {
-    private const long MaximumApiBytes = 2L * 1024 * 1024;
     private const long MaximumArchiveBytes = 512L * 1024 * 1024;
 
     public string Id { get; } = id;
 
-    public async Task<ResolvedUpstream> ResolveLatestAsync(IRemoteContentClient client, CancellationToken cancellationToken)
+    public Task<ResolvedUpstream> ResolveSupportedAsync(IRemoteContentClient client, CancellationToken cancellationToken)
     {
-        var apiUrl = $"https://api.github.com/repos/{repository}/releases/latest";
-        using var document = ParseJson(await client.GetStringAsync(apiUrl, MaximumApiBytes, cancellationToken), Id, apiUrl);
-        var root = document.RootElement;
-        var tag = RequiredString(root, "tag_name", apiUrl);
-        var sourceUrl = RequiredString(root, "html_url", apiUrl);
-        string downloadUrl;
-        if (assetName is null)
-        {
-            downloadUrl = $"https://codeload.github.com/{repository}/zip/refs/tags/{Uri.EscapeDataString(tag)}";
-        }
-        else
-        {
-            if (!root.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array)
-                throw new InvalidDataException($"{Id}: latest GitHub release does not contain an assets array.");
-            downloadUrl = assets.EnumerateArray()
-                .Where(x => x.TryGetProperty("name", out var name) && name.GetString() == assetName)
-                .Select(x => RequiredString(x, "browser_download_url", apiUrl))
-                .SingleOrDefault()
-                ?? throw new InvalidDataException($"{Id}: release '{tag}' does not contain required asset '{assetName}'.");
-        }
-
-        return new ResolvedUpstream(Id, tag, tag, null, sourceUrl, downloadUrl);
+        cancellationToken.ThrowIfCancellationRequested();
+        var escapedVersion = Uri.EscapeDataString(supportedVersion);
+        var sourceUrl = $"https://github.com/{repository}/releases/tag/{escapedVersion}";
+        var downloadUrl = assetName is null
+            ? $"https://codeload.github.com/{repository}/zip/refs/tags/{escapedVersion}"
+            : $"https://github.com/{repository}/releases/download/{escapedVersion}/{Uri.EscapeDataString(assetName)}";
+        return Task.FromResult(new ResolvedUpstream(Id, supportedVersion, supportedVersion, null, sourceUrl, downloadUrl));
     }
 
     public Task CreateSourceArchiveAsync(ResolvedUpstream source, string destinationPath, IRemoteContentClient client, CancellationToken cancellationToken)
         => client.DownloadFileAsync(source.DownloadUrl, destinationPath, MaximumArchiveBytes, cancellationToken);
 
-    internal static JsonDocument ParseJson(string json, string provider, string url)
-    {
-        try { return JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 32 }); }
-        catch (JsonException ex) { throw new InvalidDataException($"{provider}: malformed upstream JSON from '{url}': {ex.Message}", ex); }
-    }
-
-    internal static string RequiredString(JsonElement element, string property, string source)
-        => element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.GetString())
-            ? value.GetString()!
-            : throw new InvalidDataException($"Upstream response from '{source}' is missing '{property}'.");
 }
 
 public sealed class AegisUpstreamDefinition()
-    : GitHubReleaseDefinition("aegis", "aegis-icons/aegis-icons", "aegis-icons.zip");
+    : GitHubPinnedReleaseDefinition("aegis", "aegis-icons/aegis-icons", "2026-07-01", "aegis-icons.zip");
 
 public sealed class SimpleIconsUpstreamDefinition()
-    : GitHubReleaseDefinition("simple-icons", "simple-icons/simple-icons", null);
+    : GitHubPinnedReleaseDefinition("simple-icons", "simple-icons/simple-icons", "16.34.0", null);
 
 public sealed partial class DashboardIconsUpstreamDefinition : IUpstreamDefinition
 {
     internal const string AcquisitionMetadataProperty = "_otpHarborAcquisition";
     private const string Repository = "homarr-labs/dashboard-icons";
-    private const long MaximumApiBytes = 2L * 1024 * 1024;
+    internal const string SupportedRevision = "57e939e504eda0ea764098015da93aa666ad6f31";
     private const long MaximumMetadataBytes = 8L * 1024 * 1024;
     private const long MaximumCompatibleSvgBytes = 1024L * 1024;
     private const long MaximumSvgDownloadBytes = 1024L * 1024;
@@ -87,18 +65,16 @@ public sealed partial class DashboardIconsUpstreamDefinition : IUpstreamDefiniti
 
     public string Id => "dashboard-icons";
 
-    public async Task<ResolvedUpstream> ResolveLatestAsync(IRemoteContentClient client, CancellationToken cancellationToken)
+    public Task<ResolvedUpstream> ResolveSupportedAsync(IRemoteContentClient client, CancellationToken cancellationToken)
     {
-        var apiUrl = $"https://api.github.com/repos/{Repository}/commits/main";
-        using var document = GitHubReleaseDefinition.ParseJson(
-            await client.GetStringAsync(apiUrl, MaximumApiBytes, cancellationToken), Id, apiUrl);
-        var sha = GitHubReleaseDefinition.RequiredString(document.RootElement, "sha", apiUrl);
-        if (!CommitShaRegex().IsMatch(sha))
-            throw new InvalidDataException($"{Id}: upstream returned invalid commit SHA '{sha}'.");
-        var sourceUrl = document.RootElement.TryGetProperty("html_url", out var html) && html.ValueKind == JsonValueKind.String
-            ? html.GetString()! : $"https://github.com/{Repository}/commit/{sha}";
-        return new ResolvedUpstream(Id, sha, null, sha, sourceUrl,
-            $"https://raw.githubusercontent.com/{Repository}/{sha}");
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(new ResolvedUpstream(
+            Id,
+            SupportedRevision,
+            null,
+            SupportedRevision,
+            $"https://github.com/{Repository}/commit/{SupportedRevision}",
+            $"https://raw.githubusercontent.com/{Repository}/{SupportedRevision}"));
     }
 
     public async Task CreateSourceArchiveAsync(ResolvedUpstream source, string destinationPath, IRemoteContentClient client, CancellationToken cancellationToken)
@@ -271,9 +247,6 @@ public sealed partial class DashboardIconsUpstreamDefinition : IUpstreamDefiniti
         await using var stream = entry.Open();
         await stream.WriteAsync(content, cancellationToken);
     }
-
-    [GeneratedRegex("^[0-9a-f]{40}$", RegexOptions.CultureInvariant)]
-    private static partial Regex CommitShaRegex();
 
     [GeneratedRegex("^[a-z0-9][a-z0-9._-]{0,199}$", RegexOptions.CultureInvariant)]
     private static partial Regex SafeSlugRegex();

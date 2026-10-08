@@ -57,14 +57,14 @@ public sealed class SourceAcquirer : ISourceAcquirer, IDisposable
             }
 
             ResolvedUpstream resolved;
-            try { resolved = await definition.ResolveLatestAsync(_client, cancellationToken); }
+            try { resolved = await definition.ResolveSupportedAsync(_client, cancellationToken); }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidDataException)
             {
-                throw new InvalidDataException($"{definition.Id}: failed to resolve the latest upstream source: {ex.Message}", ex);
+                throw new InvalidDataException($"{definition.Id}: failed to resolve the supported upstream source: {ex.Message}", ex);
             }
             ValidateResolvedSource(definition.Id, resolved);
             var cached = await TryReadCacheAsync(

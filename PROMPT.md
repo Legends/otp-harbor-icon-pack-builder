@@ -145,6 +145,13 @@ Never mix metadata from one Dashboard Icons revision with SVGs from another revi
 
 At the beginning of a build, resolve concrete upstream versions/revisions.
 
+"Latest supported" means the newest upstream versions explicitly tested and
+pinned by the installed builder release. Do not query moving `latest` releases
+or the Dashboard Icons `main` branch during a normal build. Updating the
+supported source set requires a builder change, full automated tests, and the
+zero-failure catalog visual gate. `--refresh` redownloads the installed
+builder's pinned set; it does not opt into untested upstream changes.
+
 Record them in the generated pack.
 
 Example concept:

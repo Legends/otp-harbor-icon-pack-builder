@@ -43,7 +43,7 @@ The builder contacts the official upstream GitHub repositories for:
 - Simple Icons;
 - Dashboard Icons.
 
-Each build pins an exact upstream release or commit. Downloads are cached so later builds can reuse validated files. The cache location on Windows is:
+Each builder release carries a tested compatibility set of exact upstream releases and commits. Normal builds use those pinned sources instead of following a moving `latest` release or Dashboard Icons `main` branch. Updating the builder updates the supported source set; `--refresh` only redownloads the versions pinned by the installed builder. Downloads are cached so later builds can reuse validated files. The cache location on Windows is:
 
 ```text
 %LOCALAPPDATA%\OTP Harbor\IconPackBuilder\cache
@@ -86,7 +86,7 @@ Available options:
 --dashboard-icons <local.zip>
 ```
 
-`--offline` disables network access and requires every source to exist in the validated cache or be supplied as a local override. `--non-interactive` never prompts, and it will not replace an existing output unless `--force` is also supplied.
+`--offline` disables network access and requires every source to exist in the validated cache or be supplied as a local override. `--refresh` redownloads this builder release's pinned source set. `--non-interactive` never prompts, and it will not replace an existing output unless `--force` is also supplied.
 
 ## How the catalog is created
 

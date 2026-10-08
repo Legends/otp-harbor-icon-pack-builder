@@ -135,47 +135,40 @@ public sealed class AcquisitionTests
     }
 
     [Fact]
-    public async Task GitHubReleaseDefinitionsPinExactReleaseDownloads()
+    public async Task GitHubReleaseDefinitionsUseTestedSupportedVersions()
     {
-        var aegisApi = "https://api.github.com/repos/aegis-icons/aegis-icons/releases/latest";
-        var simpleApi = "https://api.github.com/repos/simple-icons/simple-icons/releases/latest";
-        var client = new StubRemoteClient(new Dictionary<string, byte[]>
-        {
-            [aegisApi] = Bytes("{\"tag_name\":\"2026-10-01\",\"html_url\":\"https://github.com/aegis-icons/aegis-icons/releases/tag/2026-10-01\",\"assets\":[{\"name\":\"aegis-icons.zip\",\"browser_download_url\":\"https://example.invalid/aegis-icons.zip\"}]}"),
-            [simpleApi] = Bytes("{\"tag_name\":\"16.33.0\",\"html_url\":\"https://github.com/simple-icons/simple-icons/releases/tag/16.33.0\",\"assets\":[]}")
-        });
+        var client = new StubRemoteClient();
 
-        var aegis = await new AegisUpstreamDefinition().ResolveLatestAsync(client, default);
-        var simple = await new SimpleIconsUpstreamDefinition().ResolveLatestAsync(client, default);
+        var aegis = await new AegisUpstreamDefinition().ResolveSupportedAsync(client, default);
+        var simple = await new SimpleIconsUpstreamDefinition().ResolveSupportedAsync(client, default);
 
-        Assert.Equal("2026-10-01", aegis.Version);
-        Assert.Equal("https://example.invalid/aegis-icons.zip", aegis.DownloadUrl);
-        Assert.Equal("16.33.0", simple.Version);
-        Assert.Equal("https://codeload.github.com/simple-icons/simple-icons/zip/refs/tags/16.33.0", simple.DownloadUrl);
+        Assert.Equal("2026-07-01", aegis.Version);
+        Assert.Equal("https://github.com/aegis-icons/aegis-icons/releases/download/2026-07-01/aegis-icons.zip", aegis.DownloadUrl);
+        Assert.Equal("16.34.0", simple.Version);
+        Assert.Equal("https://codeload.github.com/simple-icons/simple-icons/zip/refs/tags/16.34.0", simple.DownloadUrl);
+        Assert.Empty(client.Calls);
     }
 
     [Fact]
     public async Task DashboardAcquisitionPinsMetadataAndEveryAssetToOneCommit()
     {
         using var fixture = new TestArchive(new Dictionary<string, string> { ["placeholder"] = "x" });
-        var sha = new string('b', 40);
-        var api = "https://api.github.com/repos/homarr-labs/dashboard-icons/commits/main";
+        var sha = DashboardIconsUpstreamDefinition.SupportedRevision;
         var root = $"https://raw.githubusercontent.com/homarr-labs/dashboard-icons/{sha}";
         var client = new StubRemoteClient(new Dictionary<string, byte[]>
         {
-            [api] = Bytes($"{{\"sha\":\"{sha}\",\"html_url\":\"https://github.com/homarr-labs/dashboard-icons/commit/{sha}\"}}"),
             [root + "/metadata.json"] = Bytes("{\"alpha\":{\"base\":\"svg\"},\"png-only\":{\"base\":\"png\"}}"),
             [root + "/svg/alpha.svg"] = Bytes(TestData.Svg),
             [root + "/LICENSE"] = Bytes("fixture license")
         });
         var definition = new DashboardIconsUpstreamDefinition();
-        var resolved = await definition.ResolveLatestAsync(client, default);
+        var resolved = await definition.ResolveSupportedAsync(client, default);
         var destination = fixture.FilePath("dashboard.zip");
 
         await definition.CreateSourceArchiveAsync(resolved, destination, client, default);
 
         Assert.Equal(sha, resolved.Revision);
-        Assert.All(client.Calls.Where(x => x != api), url => Assert.StartsWith(root, url, StringComparison.Ordinal));
+        Assert.All(client.Calls, url => Assert.StartsWith(root, url, StringComparison.Ordinal));
         using var file = File.OpenRead(destination);
         using var zip = new ZipArchive(file, ZipArchiveMode.Read);
         Assert.Equal(["upstream-metadata.json", "svg/alpha.svg", "metadata.json", "LICENSE"], zip.Entries.Select(x => x.FullName));
@@ -239,7 +232,7 @@ public sealed class AcquisitionTests
         public int CreateCount { get; private set; }
         public Exception? CreateFailure { get; init; }
 
-        public Task<ResolvedUpstream> ResolveLatestAsync(IRemoteContentClient client, CancellationToken cancellationToken)
+        public Task<ResolvedUpstream> ResolveSupportedAsync(IRemoteContentClient client, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             ResolveCount++;
@@ -265,7 +258,7 @@ public sealed class AcquisitionTests
     {
         public string Id => "aegis";
 
-        public Task<ResolvedUpstream> ResolveLatestAsync(IRemoteContentClient client, CancellationToken cancellationToken)
+        public Task<ResolvedUpstream> ResolveSupportedAsync(IRemoteContentClient client, CancellationToken cancellationToken)
             => Task.FromCanceled<ResolvedUpstream>(cancellationToken);
 
         public Task CreateSourceArchiveAsync(ResolvedUpstream source, string destinationPath,

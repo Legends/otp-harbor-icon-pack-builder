@@ -703,6 +703,11 @@ the marker and text must remain unambiguous when color is unavailable or
 disabled. Respect `NO_COLOR` and do not write ANSI control sequences to
 redirected output.
 
+Immediately after a successful status, display the absolute generated pack
+path on its own emphasized bright-green `[OUTPUT] <path>` line, followed by a
+blank line. The `[OUTPUT]` marker must remain present when color is unavailable
+so the destination is easy to find in every console.
+
 When the Windows executable owns a newly opened console, including a direct
 launch or Visual Studio external console, wait at `Press Enter to close...`
 after success or failure. Do not pause when launched from an existing shell,

@@ -25,7 +25,7 @@ The executable is currently unsigned. Windows SmartScreen may therefore show an 
 
 The builder asks before choosing a different output location and before replacing an existing pack. At both `[Y/n]` prompts, pressing Enter means **Yes**.
 
-During catalog creation, an ASCII progress bar shows the percentage, completed and total brands, current brand, and elapsed time. A successful build ends in green; an error ends in red and the window remains open so you can read the message.
+During catalog creation, an ASCII progress bar shows the percentage, completed and total brands, current brand, and elapsed time. A successful build ends in green and displays the generated pack location on a separate bright `[OUTPUT]` line; an error ends in red and the window remains open so you can read the message.
 
 Alongside the pack, the builder writes:
 

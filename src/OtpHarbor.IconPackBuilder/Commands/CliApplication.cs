@@ -16,6 +16,7 @@ public static class CliApplication
     private const int CancellationExitCode = 130;
     private const string DefaultOutputFileName = "otp-harbor-icons.otphicons";
     private const string AnsiGreen = "\u001b[32m";
+    private const string AnsiBrightGreen = "\u001b[1;92m";
     private const string AnsiRed = "\u001b[31m";
     private const string AnsiYellow = "\u001b[33m";
     private const string AnsiReset = "\u001b[0m";
@@ -414,7 +415,8 @@ public static class CliApplication
     {
         output.WriteLine();
         WriteStatusLine(output, "[+] Icon pack created successfully.", AnsiGreen, useColor);
-        output.WriteLine($"Output: {path}");
+        WriteStatusLine(output, $"[OUTPUT] {path}", AnsiBrightGreen, useColor);
+        output.WriteLine();
         output.WriteLine($"Visual verification report: {visualReportPath}");
         output.WriteLine($"Sources: {string.Join(", ", sources.OrderBy(x => x.Provider, StringComparer.Ordinal).Select(x => $"{x.Provider}={x.Version ?? x.Revision ?? "local"}"))}");
         output.WriteLine($"Records: {string.Join(", ", summary.RecordsByProvider.Select(x => $"{x.Key}={x.Value}"))}");

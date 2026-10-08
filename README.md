@@ -2,30 +2,77 @@
 
 OTP Harbor Icon Pack Builder creates one local `.otphicons` file from tested Aegis Icons, Simple Icons, and Dashboard Icons sources pinned to each builder release. It downloads the source material only while you build the pack; no third-party icon collection is bundled with the executable or hosted in this repository.
 
-## Download and run on Windows
+## Download and run
 
-1. Open the [latest release](https://github.com/Legends/otp-harbor-icon-pack-builder/releases/latest).
-2. Download `OtpHarbor.IconPackBuilder-win-x64.exe`.
-3. Double-click the downloaded file.
+Open the [latest release](https://github.com/Legends/otp-harbor-icon-pack-builder/releases/latest)
+and choose the download for your computer. Starting with v1.2.0, the release
+contains:
+
+| Platform | Download |
+| --- | --- |
+| Windows on Intel or AMD | `OtpHarbor.IconPackBuilder-win-x64.exe` |
+| Windows on ARM | `OtpHarbor.IconPackBuilder-win-arm64.exe` |
+| macOS on Apple Silicon | `OtpHarbor.IconPackBuilder-osx-arm64.tar.gz` |
+| macOS on Intel | `OtpHarbor.IconPackBuilder-osx-x64.tar.gz` |
+| Linux on Intel or AMD | `OtpHarbor.IconPackBuilder-linux-x64.tar.gz` |
+| Linux on ARM64 | `OtpHarbor.IconPackBuilder-linux-arm64.tar.gz` |
+
+### Windows
+
+1. Double-click the downloaded `.exe` file.
+2. Press Enter to accept the proposed output location in your Downloads folder.
+3. Wait for the green `[+] Icon pack created successfully.` message.
+4. Press Enter to close the window.
+
+### macOS
+
+1. Double-click the downloaded `.tar.gz` file to extract it.
+2. Open the extracted folder.
+3. Double-click `Run OTP Harbor Icon Pack Builder.command`.
 4. Press Enter to accept the proposed output location in your Downloads folder.
 5. Wait for the green `[+] Icon pack created successfully.` message.
-6. Press Enter to close the window.
+
+The macOS release is not currently notarized. If macOS blocks the first launch,
+Control-click the launcher, choose **Open**, and confirm that you want to open
+it. Do not disable Gatekeeper globally.
+
+### Linux
+
+1. Extract the downloaded `.tar.gz` file.
+2. Open the extracted folder.
+3. Run `run-otp-harbor-icon-pack-builder.sh`. When offered a choice by your
+   file manager, choose **Run** or **Run as a program**.
+4. Press Enter to accept the proposed output location in your Downloads folder.
+5. Wait for the green `[+] Icon pack created successfully.` message.
+
+Linux desktop behavior differs by distribution. The archive preserves the
+launcher and executable permissions, but a file manager may still require you
+to mark the launcher as trusted before it will run.
 
 The finished file is normally:
 
 ```text
-C:\Users\<you>\Downloads\otp-harbor-icons.otphicons
+Windows: C:\Users\<you>\Downloads\otp-harbor-icons.otphicons
+macOS:   /Users/<you>/Downloads/otp-harbor-icons.otphicons
+Linux:   /home/<you>/Downloads/otp-harbor-icons.otphicons
 ```
 
-The release executable is self-contained: you do not need to install .NET, Visual Studio, Node.js, Python, or provider-specific tools. Internet access is required when downloading or refreshing the upstream sources. The first build can take several minutes while thousands of icons are downloaded, normalized, and visually checked.
+All release executables are self-contained: you do not need to install .NET,
+Visual Studio, Node.js, Python, or provider-specific tools. Internet access is
+required when downloading or refreshing the upstream sources. The first build
+can take several minutes while thousands of icons are downloaded, normalized,
+and visually checked.
 
-The executable is currently unsigned. Windows SmartScreen may therefore show an unrecognized-app warning. Confirm that the publisher location is this GitHub repository and compare the file's SHA-256 value with `SHA256SUMS.txt` from the same release before choosing **Run anyway**.
+The executables are currently unsigned. Windows SmartScreen or platform trust
+controls may therefore show a warning. Confirm that the download came from
+this GitHub repository and compare its SHA-256 value with `SHA256SUMS.txt` from
+the same release before opening it.
 
 ## What you will see
 
 The builder asks before choosing a different output location and before replacing an existing pack. At both `[Y/n]` prompts, pressing Enter means **Yes**.
 
-During catalog creation, an ASCII progress bar shows the percentage, completed and total brands, current brand, and elapsed time. A successful build ends in green and displays the generated pack location on a separate bright `[OUTPUT]` line; an error ends in red and the window remains open so you can read the message.
+During catalog creation, an ASCII progress bar shows the percentage, completed and total brands, current brand, and elapsed time. A successful build ends in green, displays the generated pack location on a separate bright `[OUTPUT]` line, and offers to reveal the file in the platform file manager. An error ends in red and the window remains open so you can read the message.
 
 Alongside the pack, the builder writes:
 
@@ -46,21 +93,31 @@ The builder contacts the official upstream GitHub repositories for:
 - Simple Icons;
 - Dashboard Icons.
 
-Each builder release carries a tested compatibility set of exact upstream releases and commits. Release-archive downloads are checked against source-controlled SHA-256 values, and commit-based sources use a full commit ID. Normal builds use those pinned sources instead of following a moving `latest` release or Dashboard Icons `main` branch. Updating the builder updates the supported source set; `--refresh` only redownloads the versions pinned by the installed builder. Downloads are cached so later builds can reuse validated files, and offline mode accepts only this release's supported cache identity. The cache location on Windows is:
+Each builder release carries a tested compatibility set of exact upstream releases and commits. Release-archive downloads are checked against source-controlled SHA-256 values, and commit-based sources use a full commit ID. Normal builds use those pinned sources instead of following a moving `latest` release or Dashboard Icons `main` branch. Updating the builder updates the supported source set; `--refresh` only redownloads the versions pinned by the installed builder. Downloads are cached so later builds can reuse validated files, and offline mode accepts only this release's supported cache identity. The cache locations are:
 
 ```text
-%LOCALAPPDATA%\OTP Harbor\IconPackBuilder\cache
+Windows: %LOCALAPPDATA%\OTP Harbor\IconPackBuilder\cache
+macOS:   ~/Library/Caches/OTP Harbor/IconPackBuilder
+Linux:   ${XDG_CACHE_HOME:-~/.cache}/otp-harbor/icon-pack-builder
 ```
 
 No account data, issuer data, or generated pack is uploaded by this tool. The generated pack and reports remain on your computer.
 
 ## Command-line use
 
-Most users can double-click the executable. PowerShell users can choose an output path explicitly:
+Most users can use the launch instructions above. PowerShell users can choose
+an output path explicitly:
 
 ```powershell
 .\OtpHarbor.IconPackBuilder-win-x64.exe build `
   --output "$env:USERPROFILE\Downloads\otp-harbor-icons.otphicons"
+```
+
+From a macOS or Linux terminal, run the executable inside the extracted folder:
+
+```sh
+./OtpHarbor.IconPackBuilder build \
+  --output "$HOME/Downloads/otp-harbor-icons.otphicons"
 ```
 
 For unattended use:
@@ -107,6 +164,9 @@ The three upstream catalogs are merged into one deterministic set of canonical b
 Every selected SVG is converted to a restricted, safe representation and compared with its source at the target tile size. A pack is written only when the complete catalog passes this verification. The output contains exact upstream revisions, source hashes, selected-icon provenance, and the license, credit, disclaimer, README, or trademark documents recognized in the pinned source snapshots.
 
 The `.otphicons` container format is documented in [Icon pack format](docs/ICON-PACK-FORMAT.md).
+
+Release coverage and remaining portability work are tracked on the
+[product agenda](docs/PRODUCT-AGENDA.md).
 
 ## Legal and distribution notice
 

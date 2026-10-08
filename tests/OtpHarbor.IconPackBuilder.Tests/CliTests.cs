@@ -82,6 +82,50 @@ public sealed class CliTests
         Assert.Contains("Use this location? [Y/n]", result.Stdout);
         Assert.Contains("100.0%", result.Stdout);
         Assert.Contains("+ [====================]", result.Stdout);
+        Assert.Contains("Show the generated file? [Y/n]", result.Stdout);
+    }
+
+    [Fact]
+    public async Task InteractiveSuccessRevealsGeneratedFileByDefault()
+    {
+        using var fixture = new CliFixture();
+        var outputPath = fixture.FilePath("revealed.otphicons");
+        string? revealedPath = null;
+
+        var result = await RunAsync([], fixture,
+            input: new StringReader(Environment.NewLine),
+            interactive: true,
+            defaultOutputPath: () => outputPath,
+            revealOutputFile: path =>
+            {
+                revealedPath = path;
+                return true;
+            });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(Path.GetFullPath(outputPath), revealedPath);
+    }
+
+    [Fact]
+    public async Task InteractiveSuccessAllowsRevealToBeDeclined()
+    {
+        using var fixture = new CliFixture();
+        var outputPath = fixture.FilePath("not-revealed.otphicons");
+        var revealCalls = 0;
+        var responses = new StringReader($"{Environment.NewLine}n{Environment.NewLine}");
+
+        var result = await RunAsync([], fixture,
+            input: responses,
+            interactive: true,
+            defaultOutputPath: () => outputPath,
+            revealOutputFile: _ =>
+            {
+                revealCalls++;
+                return true;
+            });
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(0, revealCalls);
     }
 
     [Fact]
@@ -274,13 +318,14 @@ public sealed class CliTests
         bool? interactive = false,
         Func<string>? defaultOutputPath = null,
         CancellationToken cancellationToken = default,
-        bool useColor = false)
+        bool useColor = false,
+        Func<string, bool>? revealOutputFile = null)
     {
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
         var exitCode = await CliApplication.RunAsync(args, stdout, stderr, cancellationToken,
             fixture.Acquirer, input, interactive, defaultOutputPath,
-            () => fixture.FilePath("cache"), useColor);
+            () => fixture.FilePath("cache"), useColor, revealOutputFile ?? (_ => true));
         return new CliResult(exitCode, stdout.ToString(), stderr.ToString());
     }
 

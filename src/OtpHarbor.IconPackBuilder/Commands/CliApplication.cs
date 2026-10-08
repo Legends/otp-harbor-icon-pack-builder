@@ -31,7 +31,8 @@ public static class CliApplication
         bool? interactive = null,
         Func<string>? defaultOutputPath = null,
         Func<string>? defaultCachePath = null,
-        bool useColor = false)
+        bool useColor = false,
+        Func<string, bool>? revealOutputFile = null)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(output);
@@ -43,6 +44,7 @@ public static class CliApplication
         interactive ??= !Console.IsInputRedirected;
         defaultOutputPath ??= PlatformPaths.GetDefaultOutputPath;
         defaultCachePath ??= PlatformPaths.GetCacheDirectory;
+        revealOutputFile ??= OutputFileRevealer.TryReveal;
 
         if (args.Length > 0 && args[0] is "--help" or "-h" or "help")
         {
@@ -173,6 +175,19 @@ public static class CliApplication
 
             PrintSummary(output, result.Summary, result.Document.Sources, fullOutput, visualReportPath,
                 rightsReportPath, options.RightsPolicy, useColor);
+            if (useInteractivePrompts)
+            {
+                await output.WriteLineAsync();
+                await output.WriteAsync("Show the generated file? [Y/n]: ");
+                if (IsYes(await ReadLineAsync(input, cancellationToken), defaultAnswer: true)
+                    && !revealOutputFile(fullOutput))
+                {
+                    WriteStatusLine(output,
+                        "[!] The file manager could not be opened. Use the [OUTPUT] path shown above.",
+                        AnsiYellow,
+                        useColor);
+                }
+            }
             return 0;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

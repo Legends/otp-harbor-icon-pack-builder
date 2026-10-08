@@ -219,7 +219,7 @@ public sealed class CliTests
         Assert.Contains("\u001b[32m[+] Icon pack created successfully.\u001b[0m", result.Stdout);
         Assert.Contains("Third-party icons, names, and trademarks", result.Stdout);
         Assert.Contains("License, attribution, and provenance files are included", result.Stdout);
-        Assert.Contains("#legal-and-distribution-model", result.Stdout);
+        Assert.Contains("#legal-and-distribution-notice", result.Stdout);
     }
 
     [Fact]

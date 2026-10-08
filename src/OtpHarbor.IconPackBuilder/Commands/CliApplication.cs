@@ -424,7 +424,7 @@ public static class CliApplication
         output.WriteLine();
         output.WriteLine("Legal: Third-party icons, names, and trademarks remain subject to their upstream licenses and rights holders.");
         output.WriteLine("License, attribution, and provenance files are included in the generated pack.");
-        output.WriteLine("Details: https://github.com/Legends/otp-harbor-icon-pack-builder#legal-and-distribution-model");
+        output.WriteLine("Details: https://github.com/Legends/otp-harbor-icon-pack-builder#legal-and-distribution-notice");
     }
 
     private static void WriteStatusLine(

@@ -3,9 +3,11 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>OtpHarbor.IconPackBuilder</AssemblyName>
     <RootNamespace>OtpHarbor.IconPackBuilder</RootNamespace>
-    <Version>1.0.1</Version>
-    <AssemblyVersion>1.0.1.0</AssemblyVersion>
-    <FileVersion>1.0.1.0</FileVersion>
+    <Version>1.1.0</Version>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/Legends/otp-harbor-icon-pack-builder</RepositoryUrl>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="..\..\mappings\*.json" LogicalName="OtpHarbor.IconPackBuilder.Mappings.%(Filename)%(Extension)" />

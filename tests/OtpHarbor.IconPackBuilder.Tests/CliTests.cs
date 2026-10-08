@@ -20,6 +20,8 @@ public sealed class CliTests
         Assert.True(File.Exists(outputPath));
         var visualReportPath = Path.ChangeExtension(outputPath, ".visual-report.json");
         Assert.True(File.Exists(visualReportPath));
+        var rightsReportPath = Path.ChangeExtension(outputPath, ".rights-report.json");
+        Assert.True(File.Exists(rightsReportPath));
         using (var report = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(visualReportPath)))
         {
             Assert.Equal(1, report.RootElement.GetProperty("totalBrands").GetInt32());
@@ -29,6 +31,22 @@ public sealed class CliTests
             Assert.Equal(40 * 40, brand.GetProperty("totalPixels").GetInt32());
         }
         Assert.DoesNotContain("Usage:", result.Stdout);
+    }
+
+    [Fact]
+    public async Task RightsReportExplicitlyDisclaimsLegalClearance()
+    {
+        using var fixture = new CliFixture();
+        var outputPath = fixture.FilePath("rights.otphicons");
+
+        var result = await RunAsync(["build", "--output", outputPath, "--non-interactive"], fixture);
+
+        Assert.Equal(0, result.ExitCode);
+        using var report = System.Text.Json.JsonDocument.Parse(
+            await File.ReadAllTextAsync(Path.ChangeExtension(outputPath, ".rights-report.json")));
+        Assert.True(report.RootElement.GetProperty("notLegalClearance").GetBoolean());
+        Assert.Equal("preserve", report.RootElement.GetProperty("policy").GetString());
+        Assert.True(report.RootElement.GetProperty("brands").GetArrayLength() > 0);
     }
 
     [Fact]
@@ -219,8 +237,9 @@ public sealed class CliTests
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("\u001b[32m[+] Icon pack created successfully.\u001b[0m", result.Stdout);
         Assert.Contains($"\u001b[1;92m[OUTPUT] {Path.GetFullPath(outputPath)}\u001b[0m", result.Stdout);
-        Assert.Contains("Third-party icons, names, and trademarks", result.Stdout);
-        Assert.Contains("License, attribution, and provenance files are included", result.Stdout);
+        Assert.Contains("third-party artwork, names, and trademarks", result.Stdout);
+        Assert.Contains("does not establish permission for every icon or use", result.Stdout);
+        Assert.Contains("Rights evidence report:", result.Stdout);
         Assert.Contains("#legal-and-distribution-notice", result.Stdout);
     }
 

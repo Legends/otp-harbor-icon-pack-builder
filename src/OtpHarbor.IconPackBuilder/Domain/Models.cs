@@ -80,7 +80,40 @@ public sealed record PackBuildResult(
     IReadOnlyDictionary<string, byte[]> Icons,
     IReadOnlyDictionary<string, byte[]> Licenses,
     BuildSummary Summary,
-    IReadOnlyList<VisualVerificationEntry> VisualVerification);
+    IReadOnlyList<VisualVerificationEntry> VisualVerification,
+    IReadOnlyList<RightsAssessmentEntry>? RightsAssessments = null);
+
+public enum RightsStatus
+{
+    Unknown,
+    Documented,
+    AttributionRequired,
+    Restricted
+}
+
+public enum RightsPolicy
+{
+    Preserve,
+    DocumentedOnly,
+    RequireDocumented
+}
+
+public sealed record RightsAssessment(
+    RightsStatus Status,
+    string Basis,
+    string? LicenseType,
+    string? EvidenceUrl,
+    string? Note);
+
+public sealed record RightsAssessmentEntry(
+    string BrandId,
+    string Provider,
+    string SourceId,
+    RightsStatus Status,
+    string Basis,
+    string? LicenseType,
+    string? EvidenceUrl,
+    string? Note);
 
 public sealed record VisualVerificationEntry(
     string BrandId,
@@ -104,7 +137,9 @@ public sealed record BuildSummary(
     int Conflicts,
     int SuppressedAliases,
     int SkippedRecords,
-    IReadOnlyDictionary<string, int> SelectedIconsByProvider);
+    IReadOnlyDictionary<string, int> SelectedIconsByProvider,
+    IReadOnlyDictionary<string, int>? SelectedRightsByStatus = null,
+    int RightsExcludedRecords = 0);
 
 public sealed record BuildConflict(string Type, string Key, string Message, IReadOnlyList<string> Claims);
 

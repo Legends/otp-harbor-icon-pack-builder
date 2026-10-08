@@ -15,10 +15,15 @@ public static class MappingLoader
         var canonicalPath = Path.Combine(directory, "canonical-brands.json");
         var aliasesPath = Path.Combine(directory, "issuer-aliases.json");
         var overridesPath = Path.Combine(directory, "source-overrides.json");
+        var rightsPath = Path.Combine(directory, "rights-assessments.json");
         var canonical = await ReadAsync(canonicalPath, cancellationToken);
         var aliases = await ReadAsync(aliasesPath, cancellationToken);
         var overrides = await ReadAsync(overridesPath, cancellationToken);
-        return new MappingSet(ParseCanonical(canonical, canonicalPath), ParseAliases(aliases, aliasesPath), ParseOverrides(overrides, overridesPath));
+        var rights = File.Exists(rightsPath)
+            ? ParseRights(await ReadAsync(rightsPath, cancellationToken), rightsPath)
+            : new Dictionary<string, RightsOverride>(StringComparer.OrdinalIgnoreCase);
+        return new MappingSet(ParseCanonical(canonical, canonicalPath), ParseAliases(aliases, aliasesPath),
+            ParseOverrides(overrides, overridesPath), rights);
     }
 
     public static async Task<MappingSet> LoadDefaultAsync(CancellationToken cancellationToken = default)
@@ -26,10 +31,12 @@ public static class MappingLoader
         var canonical = await ReadEmbeddedAsync("canonical-brands.json", cancellationToken);
         var aliases = await ReadEmbeddedAsync("issuer-aliases.json", cancellationToken);
         var overrides = await ReadEmbeddedAsync("source-overrides.json", cancellationToken);
+        var rights = await ReadEmbeddedAsync("rights-assessments.json", cancellationToken);
         return new MappingSet(
             ParseCanonical(canonical, "embedded:canonical-brands.json"),
             ParseAliases(aliases, "embedded:issuer-aliases.json"),
-            ParseOverrides(overrides, "embedded:source-overrides.json"));
+            ParseOverrides(overrides, "embedded:source-overrides.json"),
+            ParseRights(rights, "embedded:rights-assessments.json"));
     }
 
     private static async Task<JsonDocument> ReadAsync(string path, CancellationToken cancellationToken)
@@ -128,6 +135,40 @@ public static class MappingLoader
             return overrides.EnumerateObject().OrderBy(x => x.Name, StringComparer.Ordinal)
                 .ToDictionary(x => x.Name, x => new SourceOverride(RequiredString(x.Value, "provider", path), RequiredString(x.Value, "sourceId", path)), StringComparer.Ordinal);
         }
+    }
+
+    private static IReadOnlyDictionary<string, RightsOverride> ParseRights(JsonDocument document, string path)
+    {
+        using (document)
+        {
+            var root = document.RootElement;
+            EnsureVersion(root, path);
+            if (!root.TryGetProperty("assessments", out var assessments) || assessments.ValueKind != JsonValueKind.Object)
+                throw new InputValidationException($"Mapping '{path}' requires an 'assessments' object.");
+            var result = new Dictionary<string, RightsOverride>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in assessments.EnumerateObject().OrderBy(x => x.Name, StringComparer.Ordinal))
+            {
+                var separator = property.Name.IndexOf('/');
+                if (separator <= 0 || separator == property.Name.Length - 1)
+                    throw new InputValidationException($"Rights assessment key '{property.Name}' must be 'provider/sourceId'.");
+                var statusValue = RequiredString(property.Value, "status", path);
+                if (!TryParseRightsStatus(statusValue, out var status))
+                    throw new InputValidationException($"Rights assessment '{property.Name}' has unsupported status '{statusValue}'.");
+                var evidenceUrl = OptionalString(property.Value, "evidenceUrl");
+                if (evidenceUrl is not null
+                    && (!Uri.TryCreate(evidenceUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps))
+                    throw new InputValidationException($"Rights assessment '{property.Name}' requires an HTTPS evidenceUrl.");
+                result.Add(property.Name, new RightsOverride(status, OptionalString(property.Value, "licenseType"),
+                    evidenceUrl, OptionalString(property.Value, "note")));
+            }
+            return result;
+        }
+    }
+
+    private static bool TryParseRightsStatus(string value, out RightsStatus status)
+    {
+        var normalized = value.Replace("-", string.Empty, StringComparison.Ordinal);
+        return Enum.TryParse(normalized, ignoreCase: true, out status);
     }
 
     private static void EnsureVersion(JsonElement root, string path)

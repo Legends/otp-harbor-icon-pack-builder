@@ -18,7 +18,7 @@ public sealed class SourceAcquirer : ISourceAcquirer, IDisposable
 {
     // The cache format is part of the directory name so an open diagnostics report from an older
     // format cannot prevent a newer builder from publishing its immutable cache generation.
-    private const int ManifestVersion = 5;
+    private const int ManifestVersion = 6;
     private readonly IReadOnlyDictionary<string, IUpstreamDefinition> _definitions;
     private readonly IRemoteContentClient _client;
     private readonly bool _ownsClient;
@@ -51,7 +51,8 @@ public sealed class SourceAcquirer : ISourceAcquirer, IDisposable
 
             if (options.Offline)
             {
-                results.Add(await FindOfflineCacheAsync(definition.Id, options.CacheDirectory, cancellationToken)
+                results.Add(await FindOfflineCacheAsync(definition.Id, definition.SupportedIdentity,
+                        options.CacheDirectory, cancellationToken)
                     ?? throw new InvalidDataException($"{definition.Id}: offline mode requires a valid cached source or an explicit --{definition.Id} override."));
                 continue;
             }
@@ -107,7 +108,7 @@ public sealed class SourceAcquirer : ISourceAcquirer, IDisposable
             using (SecureZipArchive.Open(archivePath)) { }
             var sha256 = await SecureZipArchive.Sha256Async(archivePath, cancellationToken);
             var manifest = new CacheManifest(ManifestVersion, definition.Id, resolved.Identity, resolved.Version,
-                resolved.Revision, resolved.SourceUrl, resolved.DownloadUrl, sha256);
+                resolved.Revision, resolved.SourceUrl, resolved.DownloadUrl, resolved.ExpectedDownloadSha256, sha256);
             await File.WriteAllBytesAsync(Path.Combine(temporaryDirectory, "cache.json"),
                 JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions), cancellationToken);
 
@@ -137,7 +138,11 @@ public sealed class SourceAcquirer : ISourceAcquirer, IDisposable
         }
     }
 
-    private static async Task<IconSourceInput?> FindOfflineCacheAsync(string provider, string cacheRoot, CancellationToken cancellationToken)
+    private static async Task<IconSourceInput?> FindOfflineCacheAsync(
+        string provider,
+        string? supportedIdentity,
+        string cacheRoot,
+        CancellationToken cancellationToken)
     {
         var providerDirectory = Path.Combine(cacheRoot, provider);
         if (!Directory.Exists(providerDirectory)) return null;
@@ -146,7 +151,7 @@ public sealed class SourceAcquirer : ISourceAcquirer, IDisposable
                      .OrderByDescending(Directory.GetLastWriteTimeUtc)
                      .ThenBy(x => x, StringComparer.Ordinal))
         {
-            var cached = await TryReadCacheAsync(directory, provider, expectedIdentity: null, cancellationToken);
+            var cached = await TryReadCacheAsync(directory, provider, supportedIdentity, cancellationToken);
             if (cached is not null && cached.Provider.Equals(provider, StringComparison.OrdinalIgnoreCase)) return cached;
         }
         return null;
@@ -169,6 +174,7 @@ public sealed class SourceAcquirer : ISourceAcquirer, IDisposable
                 || string.IsNullOrWhiteSpace(manifest.Identity)
                 || expectedIdentity is not null && !manifest.Identity.Equals(expectedIdentity, StringComparison.Ordinal)
                 || manifest.Sha256.Length != 64
+                || manifest.ExpectedDownloadSha256 is not null && manifest.ExpectedDownloadSha256.Length != 64
                 || !IsHttpsUrl(manifest.SourceUrl)
                 || !IsHttpsUrl(manifest.DownloadUrl))
                 return null;
@@ -225,6 +231,7 @@ public sealed class SourceAcquirer : ISourceAcquirer, IDisposable
         string? Revision,
         string SourceUrl,
         string DownloadUrl,
+        string? ExpectedDownloadSha256,
         string Sha256);
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)

@@ -15,7 +15,8 @@ public sealed class BrandMerger
         IReadOnlyList<string>? providerPreference = null,
         string packId = "otp-harbor-icons",
         string packName = "OTP Harbor Icons",
-        Action<CatalogBuildProgress>? progress = null)
+        Action<CatalogBuildProgress>? progress = null,
+        RightsPolicy rightsPolicy = RightsPolicy.Preserve)
     {
         if (catalogs.Count == 0) throw new InputValidationException("At least one provider input is required.");
         providerPreference ??= DefaultProviderPreference;
@@ -27,10 +28,26 @@ public sealed class BrandMerger
             .ThenBy(x => x.SourceId, StringComparer.Ordinal)
             .ToArray();
         var conflicts = FindDuplicateSources(allProviderRecords);
-        var allRecords = allProviderRecords.Where(x => x.AutomaticCandidate
+        var canonicalCandidates = allProviderRecords.Where(x => x.AutomaticCandidate
                 || sourceMappings.ContainsKey(Key(x.Provider, x.SourceId))
                 || explicitlySelected.Contains(Key(x.Provider, x.SourceId)))
             .ToArray();
+        var rightsExcludedRecords = 0;
+        var allRecords = canonicalCandidates;
+        IReadOnlyDictionary<string, SourceOverride> effectiveSourceOverrides = mappings.SourceOverrides;
+        if (rightsPolicy == RightsPolicy.DocumentedOnly)
+        {
+            allRecords = canonicalCandidates.Where(record =>
+                RightsAssessor.IsDocumented(RightsAssessor.Assess(record, mappings.EffectiveRightsOverrides))).ToArray();
+            rightsExcludedRecords = canonicalCandidates.Length - allRecords.Length;
+            var eligibleKeys = allRecords.Select(x => Key(x.Provider, x.SourceId))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            effectiveSourceOverrides = mappings.SourceOverrides
+                .Where(x => eligibleKeys.Contains(Key(x.Value.Provider, x.Value.SourceId)))
+                .ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
+            if (allRecords.Length == 0)
+                throw new InputValidationException("Rights policy 'documented-only' excluded every source record because no asset-level evidence was available.");
+        }
         var nameMappings = BuildNameMappings(mappings.CanonicalBrands);
         var groups = new SortedDictionary<string, BrandGroup>(StringComparer.Ordinal);
 
@@ -72,16 +89,26 @@ public sealed class BrandMerger
         var icons = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
         var aliasCandidates = new Dictionary<string, List<AliasCandidate>>(StringComparer.Ordinal);
         var selectedCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        var rightsCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        var rightsAssessments = new List<RightsAssessmentEntry>();
         var visualVerification = new List<VisualVerificationEntry>();
         var completedBrands = 0;
 
         foreach (var group in groups.Values)
         {
             progress?.Invoke(new CatalogBuildProgress(completedBrands, groups.Count, group.Id));
-            var selected = SelectSource(group, mappings.SourceOverrides, providerPreference);
+            var selected = SelectSource(group, effectiveSourceOverrides, providerPreference);
+            var selectedRights = RightsAssessor.Assess(selected.Record, mappings.EffectiveRightsOverrides);
+            if (rightsPolicy == RightsPolicy.RequireDocumented && !RightsAssessor.IsDocumented(selectedRights))
+                throw new InputValidationException($"Brand '{group.Id}' selected '{selected.Record.Provider}/{selected.Record.SourceId}' with rights status '{RightsAssessor.ToMetadataValue(selectedRights.Status)}'. Add reviewed evidence in rights-assessments.json, choose another source, or use --rights-policy preserve.");
             var iconPath = $"icons/{group.Id}.svg";
             icons.Add(iconPath, selected.Normalized.Svg);
             selectedCounts[selected.Record.Provider] = selectedCounts.GetValueOrDefault(selected.Record.Provider) + 1;
+            var rightsStatus = RightsAssessor.ToMetadataValue(selectedRights.Status);
+            rightsCounts[rightsStatus] = rightsCounts.GetValueOrDefault(rightsStatus) + 1;
+            rightsAssessments.Add(new RightsAssessmentEntry(group.Id, selected.Record.Provider,
+                selected.Record.SourceId, selectedRights.Status, selectedRights.Basis,
+                selectedRights.LicenseType, selectedRights.EvidenceUrl, selectedRights.Note));
 
             foreach (var candidate in BuildAliasCandidates(group, mappings.IssuerAliases.GetValueOrDefault(group.Id)))
             {
@@ -92,8 +119,12 @@ public sealed class BrandMerger
             }
             var sourceReferences = group.Records
                 .OrderBy(x => x.Provider, StringComparer.Ordinal).ThenBy(x => x.SourceId, StringComparer.Ordinal)
-                .Select(x => new SourceReference(x.Provider, x.SourceId, SortedMetadata(x.Metadata))).ToArray();
+                .Select(x => new SourceReference(x.Provider, x.SourceId,
+                    SortedMetadata(WithRightsMetadata(x.Metadata,
+                        RightsAssessor.Assess(x, mappings.EffectiveRightsOverrides)))))
+                .ToArray();
             var selectedMetadata = selected.Record.Metadata.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
+            AddRightsMetadata(selectedMetadata, selectedRights);
             selectedMetadata["visualNormalization"] = selected.Normalized.Operations.Count == 0
                 ? "canonical-pass-through"
                 : string.Join(',', selected.Normalized.Operations);
@@ -164,8 +195,14 @@ public sealed class BrandMerger
             outputBrands.Length, issuerAliases.Count, allRecords.Length - outputBrands.Length, 0,
             aliasResolution.SuppressedAliases,
             catalogs.Sum(x => x.SkippedRecords) + allProviderRecords.Length - allRecords.Length, selectedCounts);
+        summary = summary with
+        {
+            SelectedRightsByStatus = rightsCounts,
+            RightsExcludedRecords = rightsExcludedRecords
+        };
         return new PackBuildResult(document, icons, licenses, summary,
-            visualVerification.OrderBy(x => x.BrandId, StringComparer.Ordinal).ToArray());
+            visualVerification.OrderBy(x => x.BrandId, StringComparer.Ordinal).ToArray(),
+            rightsAssessments.OrderBy(x => x.BrandId, StringComparer.Ordinal).ToArray());
     }
 
     private static List<BuildConflict> FindDuplicateSources(IReadOnlyList<SourceRecord> records)
@@ -362,6 +399,24 @@ public sealed class BrandMerger
 
     private static IReadOnlyDictionary<string, string?> SortedMetadata(IReadOnlyDictionary<string, string?> metadata)
         => metadata.OrderBy(x => x.Key, StringComparer.Ordinal).ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
+
+    private static IReadOnlyDictionary<string, string?> WithRightsMetadata(
+        IReadOnlyDictionary<string, string?> metadata,
+        RightsAssessment assessment)
+    {
+        var result = metadata.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
+        AddRightsMetadata(result, assessment);
+        return result;
+    }
+
+    private static void AddRightsMetadata(IDictionary<string, string?> metadata, RightsAssessment assessment)
+    {
+        metadata["rightsStatus"] = RightsAssessor.ToMetadataValue(assessment.Status);
+        metadata["rightsBasis"] = assessment.Basis;
+        metadata["rightsLicenseType"] = assessment.LicenseType;
+        metadata["rightsEvidenceUrl"] = assessment.EvidenceUrl;
+        metadata["rightsNote"] = assessment.Note;
+    }
 
     private static string Key(string provider, string sourceId) => provider + "/" + sourceId;
 

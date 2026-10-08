@@ -297,6 +297,74 @@ public sealed class MergeTests
         Assert.Contains(exception.Conflicts, x => x.Type == "duplicate-source");
     }
 
+    [Fact]
+    public void PreservePolicyMarksMissingAssetEvidenceUnknownWithoutClaimingClearance()
+    {
+        var result = new BrandMerger().Merge(
+            [TestData.Catalog("aegis", TestData.Record("aegis", "Example", "Example"))],
+            MappingSet.Empty);
+
+        var brand = Assert.Single(result.Document.Brands);
+        Assert.Equal("unknown", brand.SelectedSource.Metadata["rightsStatus"]);
+        Assert.Equal("no-asset-level-evidence", brand.SelectedSource.Metadata["rightsBasis"]);
+        Assert.Equal(1, result.Summary.SelectedRightsByStatus!["unknown"]);
+    }
+
+    [Fact]
+    public void DocumentedOnlyExcludesUnknownSourcesAndKeepsAssetLevelEvidence()
+    {
+        var unknown = TestData.Record("aegis", "Example", "Example");
+        var documented = TestData.Record("simple-icons", "example", "Example") with
+        {
+            Metadata = new SortedDictionary<string, string?>(StringComparer.Ordinal)
+            {
+                ["licenseType"] = "CC-BY-4.0",
+                ["licenseUrl"] = "https://creativecommons.org/licenses/by/4.0/"
+            }
+        };
+        var mapping = new CanonicalBrandMapping("example", "Example", ["Example"],
+            [new("aegis", "Example"), new("simple-icons", "example")]);
+
+        var result = new BrandMerger().Merge(
+            [TestData.Catalog("aegis", unknown), TestData.Catalog("simple-icons", documented)],
+            TestData.Mappings(mapping), rightsPolicy: RightsPolicy.DocumentedOnly);
+
+        var brand = Assert.Single(result.Document.Brands);
+        Assert.Equal("simple-icons", brand.SelectedSource.Provider);
+        Assert.Equal("attribution-required", brand.SelectedSource.Metadata["rightsStatus"]);
+        Assert.Equal(1, result.Summary.RightsExcludedRecords);
+    }
+
+    [Fact]
+    public void RequireDocumentedFailsWhenSelectedSourceHasNoAssetEvidence()
+    {
+        var exception = Assert.Throws<InputValidationException>(() => new BrandMerger().Merge(
+            [TestData.Catalog("aegis", TestData.Record("aegis", "Example", "Example"))],
+            MappingSet.Empty, rightsPolicy: RightsPolicy.RequireDocumented));
+
+        Assert.Contains("rights status 'unknown'", exception.Message);
+    }
+
+    [Fact]
+    public void ManualRightsAssessmentRecordsItsEvidenceWithoutCallingItLegalClearance()
+    {
+        var mappings = new MappingSet([], new Dictionary<string, IReadOnlyList<string>>(),
+            new Dictionary<string, SourceOverride>(),
+            new Dictionary<string, RightsOverride>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["aegis/Example"] = new(RightsStatus.AttributionRequired, "CC-BY-4.0",
+                    "https://example.test/evidence", "Reviewed upstream credit record.")
+            });
+
+        var result = new BrandMerger().Merge(
+            [TestData.Catalog("aegis", TestData.Record("aegis", "Example", "Example"))], mappings,
+            rightsPolicy: RightsPolicy.RequireDocumented);
+
+        var brand = Assert.Single(result.Document.Brands);
+        Assert.Equal("manual-review", brand.SelectedSource.Metadata["rightsBasis"]);
+        Assert.Equal("https://example.test/evidence", brand.SelectedSource.Metadata["rightsEvidenceUrl"]);
+    }
+
     private static SourceRecord RecordWithColors(
         string provider,
         string sourceId,

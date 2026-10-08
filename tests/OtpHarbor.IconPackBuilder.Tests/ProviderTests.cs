@@ -25,7 +25,8 @@ public sealed class ProviderTests
             ["aegis-icons-main/icons/2_Variations/GitHub alt.svg"] = TestData.Svg,
             ["aegis-icons-main/icons/3_Categories/Banking.svg"] = TestData.Svg,
             ["aegis-icons-main/icons/3_Generic/Privacy.svg"] = TestData.Svg,
-            ["aegis-icons-main/LICENSE.md"] = "fixture license"
+            ["aegis-icons-main/LICENSE.md"] = "fixture license",
+            ["aegis-icons-main/README.md"] = "fixture credits"
         });
 
         var catalog = await new AegisProvider().LoadAsync(new("aegis", archive.Path));
@@ -39,7 +40,7 @@ public sealed class ProviderTests
         var variation = Assert.Single(catalog.Records, x => !x.AutomaticCandidate);
         Assert.Equal("variation", variation.Quality);
         Assert.Equal(2, catalog.SkippedRecords);
-        Assert.Single(catalog.Licenses);
+        Assert.Equal(["LICENSE.md", "README.md"], catalog.Licenses.Select(x => x.FileName));
     }
 
     [Fact]

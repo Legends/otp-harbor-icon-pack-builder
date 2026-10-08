@@ -81,17 +81,34 @@ internal static partial class ProviderHelpers
     {
         var paths = archive.Paths.Where(x =>
         {
+            if (x.Count(character => character == '/') > 1) return false;
             var name = Path.GetFileName(x);
-            return name.StartsWith("LICENSE", StringComparison.OrdinalIgnoreCase)
+            var extension = Path.GetExtension(name);
+            var supportedDocument = extension.Equals(".md", StringComparison.OrdinalIgnoreCase)
+                || extension.Equals(".txt", StringComparison.OrdinalIgnoreCase)
+                || extension.Length == 0;
+            return supportedDocument && (name.StartsWith("LICENSE", StringComparison.OrdinalIgnoreCase)
                 || name.StartsWith("LICENCE", StringComparison.OrdinalIgnoreCase)
                 || name.StartsWith("COPYING", StringComparison.OrdinalIgnoreCase)
                 || name.StartsWith("NOTICE", StringComparison.OrdinalIgnoreCase)
-                || name.Equals("DISCLAIMER.md", StringComparison.OrdinalIgnoreCase);
-        }).OrderBy(x => x, StringComparer.Ordinal).Take(20).ToArray();
+                || name.StartsWith("CREDITS", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("ATTRIBUTION", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("AUTHORS", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("TRADEMARK", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("README", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("DISCLAIMER.md", StringComparison.OrdinalIgnoreCase));
+        }).OrderBy(x => x, StringComparer.Ordinal).Take(40).ToArray();
 
         var result = new List<SourceLicense>();
+        long totalBytes = 0;
         foreach (var path in paths)
-            result.Add(new SourceLicense(Path.GetFileName(path), archive.ReadAsync(path, 1_048_576, cancellationToken).GetAwaiter().GetResult()));
+        {
+            var content = archive.ReadAsync(path, 1_048_576, cancellationToken).GetAwaiter().GetResult();
+            totalBytes += content.LongLength;
+            if (totalBytes > 8L * 1024 * 1024)
+                throw new InputValidationException("Upstream legal and attribution documents exceed the 8 MiB combined limit.");
+            result.Add(new SourceLicense(Path.GetFileName(path), content));
+        }
         return result;
     }
 

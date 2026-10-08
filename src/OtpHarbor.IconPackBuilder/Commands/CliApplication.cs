@@ -73,11 +73,16 @@ public static class CliApplication
             var fullOutput = Path.GetFullPath(outputPath);
             var conflictPath = Path.GetFullPath(options.ConflictPath ?? Path.ChangeExtension(fullOutput, ".conflicts.json"));
             var visualReportPath = Path.ChangeExtension(fullOutput, ".visual-report.json");
+            var rightsReportPath = Path.ChangeExtension(fullOutput, ".rights-report.json");
             if (fullOutput.Equals(conflictPath, StringComparison.OrdinalIgnoreCase))
                 throw new InputValidationException("The output and conflict-report paths must be different.");
             if (fullOutput.Equals(visualReportPath, StringComparison.OrdinalIgnoreCase)
                 || conflictPath.Equals(visualReportPath, StringComparison.OrdinalIgnoreCase))
                 throw new InputValidationException("The output, conflict-report, and visual-report paths must be different.");
+            if (fullOutput.Equals(rightsReportPath, StringComparison.OrdinalIgnoreCase)
+                || conflictPath.Equals(rightsReportPath, StringComparison.OrdinalIgnoreCase)
+                || visualReportPath.Equals(rightsReportPath, StringComparison.OrdinalIgnoreCase))
+                throw new InputValidationException("The output and report paths must all be different.");
 
             if (!await ConfirmOverwriteAsync(fullOutput, options.Force, useInteractivePrompts, input, output, cancellationToken))
             {
@@ -120,7 +125,7 @@ public static class CliApplication
             try
             {
                 result = new BrandMerger().Merge(catalogs, mappings, options.ProviderPreference,
-                    progress: progress.Report);
+                    progress: progress.Report, rightsPolicy: options.RightsPolicy);
                 progress.Complete();
             }
             catch (BuildConflictException ex)
@@ -143,25 +148,31 @@ public static class CliApplication
             Directory.CreateDirectory(outputDirectory);
             var temporary = Path.Combine(outputDirectory, $".{Path.GetFileName(fullOutput)}.{Guid.NewGuid():N}.tmp");
             var temporaryVisualReport = Path.Combine(outputDirectory, $".{Path.GetFileName(visualReportPath)}.{Guid.NewGuid():N}.tmp");
+            var temporaryRightsReport = Path.Combine(outputDirectory, $".{Path.GetFileName(rightsReportPath)}.{Guid.NewGuid():N}.tmp");
             try
             {
                 await PackSerializer.WriteAsync(temporary, result, cancellationToken);
                 await output.WriteLineAsync("Validating completed pack...");
                 await PackReader.ReadAndValidateAsync(temporary, cancellationToken);
                 await VisualVerificationReportWriter.WriteAsync(temporaryVisualReport, result.VisualVerification, cancellationToken);
+                await RightsAssessmentReportWriter.WriteAsync(temporaryRightsReport, options.RightsPolicy,
+                    result.RightsAssessments ?? [], result.Summary.RightsExcludedRecords, cancellationToken);
 
                 // A successful pack must never be accompanied by a stale report from an older failed build.
                 if (File.Exists(conflictPath)) File.Delete(conflictPath);
                 File.Move(temporary, fullOutput, overwrite: options.Force || useInteractivePrompts);
                 File.Move(temporaryVisualReport, visualReportPath, overwrite: true);
+                File.Move(temporaryRightsReport, rightsReportPath, overwrite: true);
             }
             finally
             {
                 if (File.Exists(temporary)) File.Delete(temporary);
                 if (File.Exists(temporaryVisualReport)) File.Delete(temporaryVisualReport);
+                if (File.Exists(temporaryRightsReport)) File.Delete(temporaryRightsReport);
             }
 
-            PrintSummary(output, result.Summary, result.Document.Sources, fullOutput, visualReportPath, useColor);
+            PrintSummary(output, result.Summary, result.Document.Sources, fullOutput, visualReportPath,
+                rightsReportPath, options.RightsPolicy, useColor);
             return 0;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -207,13 +218,16 @@ public static class CliApplication
         var refresh = false;
         var nonInteractive = false;
         var force = false;
+        var rightsPolicy = RightsPolicy.Preserve;
+        var rightsPolicySpecified = false;
         var start = args.Length == 0 ? 0 : 1;
 
         for (var i = start; i < args.Length; i++)
         {
             var option = args[i];
             if (option is "--help" or "-h")
-                return new CliOptions(null, null, null, null, localOverrides, null, false, false, false, false, true);
+                return new CliOptions(null, null, null, null, localOverrides, null, RightsPolicy.Preserve,
+                    false, false, false, false, true);
             switch (option.ToLowerInvariant())
             {
                 case "--offline": offline = true; continue;
@@ -244,14 +258,27 @@ public static class CliApplication
                     if (preference is not null) throw new InputValidationException("--provider-preference may be specified only once.");
                     preference = ValidatePreference(value, providers);
                     break;
+                case "rights-policy":
+                    if (rightsPolicySpecified) throw new InputValidationException("--rights-policy may be specified only once.");
+                    rightsPolicy = ParseRightsPolicy(value);
+                    rightsPolicySpecified = true;
+                    break;
                 default: throw new InputValidationException($"Unknown option '{option}'.");
             }
         }
 
         if (offline && refresh) throw new InputValidationException("--offline and --refresh cannot be used together.");
-        return new CliOptions(outputPath, conflictPath, mappingsPath, cachePath, localOverrides, preference,
+        return new CliOptions(outputPath, conflictPath, mappingsPath, cachePath, localOverrides, preference, rightsPolicy,
             offline, refresh, nonInteractive, force, false);
     }
+
+    private static RightsPolicy ParseRightsPolicy(string value) => value.ToLowerInvariant() switch
+    {
+        "preserve" => RightsPolicy.Preserve,
+        "documented-only" => RightsPolicy.DocumentedOnly,
+        "require-documented" => RightsPolicy.RequireDocumented,
+        _ => throw new InputValidationException("--rights-policy must be preserve, documented-only, or require-documented.")
+    };
 
     private static string SingleValue(string? current, string value, string option)
         => current is null ? value : throw new InputValidationException($"Option '{option}' may be specified only once.");
@@ -411,6 +438,8 @@ public static class CliApplication
         IReadOnlyList<PackSource> sources,
         string path,
         string visualReportPath,
+        string rightsReportPath,
+        RightsPolicy rightsPolicy,
         bool useColor)
     {
         output.WriteLine();
@@ -418,14 +447,18 @@ public static class CliApplication
         WriteStatusLine(output, $"[OUTPUT] {path}", AnsiBrightGreen, useColor);
         output.WriteLine();
         output.WriteLine($"Visual verification report: {visualReportPath}");
+        output.WriteLine($"Rights evidence report: {rightsReportPath}");
         output.WriteLine($"Sources: {string.Join(", ", sources.OrderBy(x => x.Provider, StringComparer.Ordinal).Select(x => $"{x.Provider}={x.Version ?? x.Revision ?? "local"}"))}");
         output.WriteLine($"Records: {string.Join(", ", summary.RecordsByProvider.Select(x => $"{x.Key}={x.Value}"))}");
         output.WriteLine($"Canonical brands: {summary.CanonicalBrands}; aliases: {summary.Aliases}; merged records: {summary.BrandsMerged}");
         output.WriteLine($"Conflicts: {summary.Conflicts}; suppressed ambiguous aliases: {summary.SuppressedAliases}; invalid/skipped records: {summary.SkippedRecords}");
         output.WriteLine($"Selected icons: {string.Join(", ", summary.SelectedIconsByProvider.Select(x => $"{x.Key}={x.Value}"))}");
+        output.WriteLine($"Rights evidence ({RightsAssessmentReportWriter.PolicyValue(rightsPolicy)}): {string.Join(", ", (summary.SelectedRightsByStatus ?? new Dictionary<string, int>()).Select(x => $"{x.Key}={x.Value}"))}; excluded source records: {summary.RightsExcludedRecords}");
         output.WriteLine();
-        output.WriteLine("Legal: Third-party icons, names, and trademarks remain subject to their upstream licenses and rights holders.");
-        output.WriteLine("License, attribution, and provenance files are included in the generated pack.");
+        output.WriteLine("Legal notice: This pack contains third-party artwork, names, and trademarks.");
+        output.WriteLine("Available upstream notices and provenance were preserved where supplied; this does not establish permission for every icon or use.");
+        output.WriteLine("Review the rights evidence report, applicable licenses, and brand guidelines before redistribution or public/commercial use.");
+        output.WriteLine("The pack is not sponsored by or endorsed by the brands represented.");
         output.WriteLine("Details: https://github.com/Legends/otp-harbor-icon-pack-builder#legal-and-distribution-notice");
     }
 
@@ -461,6 +494,7 @@ public static class CliApplication
         writer.WriteLine("  --cache <directory>          Override the platform cache location");
         writer.WriteLine("  --mappings <directory>       Override mapping files");
         writer.WriteLine("  --provider-preference <ids>  Comma-separated provider IDs");
+        writer.WriteLine("  --rights-policy <policy>     preserve (default), documented-only, or require-documented");
         writer.WriteLine("  --conflict-report <json>     Override conflict-report path");
     }
 
@@ -471,6 +505,7 @@ public static class CliApplication
         string? CachePath,
         IReadOnlyDictionary<string, string> LocalOverrides,
         IReadOnlyList<string>? ProviderPreference,
+        RightsPolicy RightsPolicy,
         bool Offline,
         bool Refresh,
         bool NonInteractive,

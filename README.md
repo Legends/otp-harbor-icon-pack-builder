@@ -31,9 +31,12 @@ Alongside the pack, the builder writes:
 
 ```text
 otp-harbor-icons.visual-report.json
+otp-harbor-icons.rights-report.json
 ```
 
-This diagnostic report confirms that the complete catalog passed the visual verification gate. It is not part of the icon pack and does not need to be imported or copied elsewhere.
+The visual report confirms that the catalog passed the technical visual gate.
+The rights report records the evidence available for each selected asset.
+Neither technical validation nor an evidence status is legal clearance.
 
 ## Files and privacy
 
@@ -43,7 +46,7 @@ The builder contacts the official upstream GitHub repositories for:
 - Simple Icons;
 - Dashboard Icons.
 
-Each builder release carries a tested compatibility set of exact upstream releases and commits. Normal builds use those pinned sources instead of following a moving `latest` release or Dashboard Icons `main` branch. Updating the builder updates the supported source set; `--refresh` only redownloads the versions pinned by the installed builder. Downloads are cached so later builds can reuse validated files. The cache location on Windows is:
+Each builder release carries a tested compatibility set of exact upstream releases and commits. Release-archive downloads are checked against source-controlled SHA-256 values, and commit-based sources use a full commit ID. Normal builds use those pinned sources instead of following a moving `latest` release or Dashboard Icons `main` branch. Updating the builder updates the supported source set; `--refresh` only redownloads the versions pinned by the installed builder. Downloads are cached so later builds can reuse validated files, and offline mode accepts only this release's supported cache identity. The cache location on Windows is:
 
 ```text
 %LOCALAPPDATA%\OTP Harbor\IconPackBuilder\cache
@@ -80,6 +83,7 @@ Available options:
 --cache <directory>
 --mappings <directory>
 --provider-preference <comma-separated provider IDs>
+--rights-policy <preserve|documented-only|require-documented>
 --conflict-report <path.json>
 --aegis <local.zip>
 --simple-icons <local.zip>
@@ -90,16 +94,83 @@ Available options:
 
 ## How the catalog is created
 
+The default rights policy is preserve: it keeps deterministic visual selection
+and records the selected asset's evidence status. The documented-only policy
+excludes source records without asset-level license evidence before selection.
+The require-documented policy keeps normal selection but stops if a selected
+asset lacks that evidence. These are evidence filters, not legal opinions:
+metadata can be incomplete, a copyright license may not grant trademark rights,
+and a documented license may still impose conditions.
+
 The three upstream catalogs are merged into one deterministic set of canonical brands. Matching uses issuer aliases, not account names. Exact and explicitly mapped identities are preferred; ambiguous aliases are excluded instead of being assigned to the wrong brand.
 
-Every selected SVG is converted to a restricted, safe representation and compared with its source at the target tile size. A pack is written only when the complete catalog passes this verification. The output contains its exact upstream revisions, source hashes, selected-icon provenance, licenses, and attribution files.
+Every selected SVG is converted to a restricted, safe representation and compared with its source at the target tile size. A pack is written only when the complete catalog passes this verification. The output contains exact upstream revisions, source hashes, selected-icon provenance, and the license, credit, disclaimer, README, or trademark documents recognized in the pinned source snapshots.
 
 The `.otphicons` container format is documented in [Icon pack format](docs/ICON-PACK-FORMAT.md).
 
 ## Legal and distribution notice
 
-This repository and its releases do not redistribute upstream icon collections or generated icon packs. Icons, names, and trademarks remain the property of their respective rights holders. Review the included upstream licenses, trademark policies, and brand guidelines before using or sharing a generated pack.
+This is a risk-control and provenance system, not automated legal clearance.
+Available upstream notices and provenance are preserved where supplied, but
+their inclusion does not prove that every asset is authorized for every
+purpose, territory, modification, or distribution channel.
 
-Dashboard Icons identifies its repository license as [Apache License 2.0](https://github.com/homarr-labs/dashboard-icons/blob/main/LICENSE). The builder copies that license from the same immutable commit as the selected Dashboard Icons data and preserves it in the generated pack. Apache-2.0 does not grant permission to use third-party trademarks represented by individual icons; applicable trademark and brand-usage rules remain separate.
+The evidence statuses have deliberately narrow meanings:
 
-The generated pack's `pack.json` and `licenses/` entries are the authoritative record of the sources, licenses, attribution, and provenance included in that particular build.
+- unknown: no asset-level license evidence was found;
+- documented: upstream supplied asset-level license metadata;
+- attribution-required: the metadata identifies a non-public-domain license
+  whose attribution, notice, or other conditions require review;
+- restricted: a manual review identified a restriction requiring exclusion
+  or individual review.
+
+Documented never means legally cleared. Manual conclusions belong in
+mappings/rights-assessments.json with an evidence URL and note. Repository
+licenses are not automatically treated as licenses for every depicted logo.
+
+[Simple Icons expressly warns](https://github.com/simple-icons/simple-icons/blob/develop/DISCLAIMER.md)
+that its project-level CC0 dedication does not establish CC0 status for each
+icon and that license data can be missing or outdated. [Aegis Icons documents
+mixed upstream licensing](https://github.com/aegis-icons/aegis-icons) in its
+README; Aegis assets therefore remain unknown unless a source-specific manual
+assessment is added. [Dashboard Icons uses
+Apache-2.0](https://github.com/homarr-labs/dashboard-icons/blob/main/LICENSE)
+for its repository and separately disclaims ownership or endorsement of brand
+marks. Apache-2.0 itself does not grant trademark rights.
+
+For EU trademarks, Article 14 of Regulation (EU) 2017/1001 permits some
+identifying or referential use, but only in accordance with honest practices
+in industrial or commercial matters. German MarkenG section 23 follows the
+same structure. This is context-specific, not blanket permission. Copyright
+remains independent: Article 2 of Directive 2001/29/EC reserves reproduction,
+while Article 5 permits defined national exceptions. German UrhG section 53,
+for example, limits private copying to specified circumstances and does not
+authorize redistribution. Obtain qualified advice for a concrete commercial,
+public, or cross-border use.
+
+This repository and its releases do not redistribute upstream icon collections
+or generated icon packs.
+
+The generated pack's `pack.json` and `licenses/` entries record the sources,
+evidence, notices, and provenance actually preserved in that build; they do
+not guarantee completeness or permission.
+
+The classification rules and primary legal sources are documented in the
+[rights-evidence policy](docs/RIGHTS-POLICY.md).
+
+Rights holders or their representatives can open a GitHub issue identifying
+the provider, source ID, evidence, and requested action. Maintainers should
+record the review in mappings/rights-assessments.json, exclude a disputed
+asset when appropriate, and publish a new release rather than silently
+replacing an existing release.
+
+## Builder software license
+
+The builder source code and documentation are licensed under
+[Apache License 2.0](LICENSE). That license does not cover third-party icons,
+logos, names, or trademarks. Runtime dependency notices are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), and distribution notices are
+in [NOTICE](NOTICE).
+
+Contributions use the same inbound Apache-2.0 terms described in
+[CONTRIBUTING.md](CONTRIBUTING.md).

@@ -12,11 +12,13 @@ public sealed record ResolvedUpstream(
     string? Version,
     string? Revision,
     string SourceUrl,
-    string DownloadUrl);
+    string DownloadUrl,
+    string? ExpectedDownloadSha256 = null);
 
 public interface IUpstreamDefinition
 {
     string Id { get; }
+    string? SupportedIdentity => null;
     Task<ResolvedUpstream> ResolveSupportedAsync(IRemoteContentClient client, CancellationToken cancellationToken);
     Task CreateSourceArchiveAsync(ResolvedUpstream source, string destinationPath, IRemoteContentClient client, CancellationToken cancellationToken);
 }
@@ -25,33 +27,108 @@ public abstract class GitHubPinnedReleaseDefinition(
     string id,
     string repository,
     string supportedVersion,
-    string? assetName) : IUpstreamDefinition
+    string supportedRevision,
+    string? assetName,
+    string expectedDownloadSha256) : IUpstreamDefinition
 {
     private const long MaximumArchiveBytes = 512L * 1024 * 1024;
 
     public string Id { get; } = id;
+    public string? SupportedIdentity => supportedVersion;
 
     public Task<ResolvedUpstream> ResolveSupportedAsync(IRemoteContentClient client, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var escapedVersion = Uri.EscapeDataString(supportedVersion);
-        var sourceUrl = $"https://github.com/{repository}/releases/tag/{escapedVersion}";
+        var sourceUrl = $"https://github.com/{repository}/commit/{supportedRevision}";
         var downloadUrl = assetName is null
             ? $"https://codeload.github.com/{repository}/zip/refs/tags/{escapedVersion}"
             : $"https://github.com/{repository}/releases/download/{escapedVersion}/{Uri.EscapeDataString(assetName)}";
-        return Task.FromResult(new ResolvedUpstream(Id, supportedVersion, supportedVersion, null, sourceUrl, downloadUrl));
+        return Task.FromResult(new ResolvedUpstream(Id, supportedVersion, supportedVersion, supportedRevision,
+            sourceUrl, downloadUrl, expectedDownloadSha256));
     }
 
-    public Task CreateSourceArchiveAsync(ResolvedUpstream source, string destinationPath, IRemoteContentClient client, CancellationToken cancellationToken)
-        => client.DownloadFileAsync(source.DownloadUrl, destinationPath, MaximumArchiveBytes, cancellationToken);
+    public virtual async Task CreateSourceArchiveAsync(ResolvedUpstream source, string destinationPath, IRemoteContentClient client, CancellationToken cancellationToken)
+    {
+        await client.DownloadFileAsync(source.DownloadUrl, destinationPath, MaximumArchiveBytes, cancellationToken);
+        await VerifyExpectedDownloadAsync(source, destinationPath, cancellationToken);
+    }
 
+    protected static async Task VerifyExpectedDownloadAsync(
+        ResolvedUpstream source,
+        string path,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(source.ExpectedDownloadSha256))
+            throw new InvalidDataException($"{source.Provider}: pinned release is missing an expected SHA-256.");
+        var actual = await SecureZipArchive.Sha256Async(path, cancellationToken);
+        if (!actual.Equals(source.ExpectedDownloadSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException($"{source.Provider}: pinned download SHA-256 mismatch for '{source.Identity}'. Expected {source.ExpectedDownloadSha256}; received {actual}.");
+    }
 }
 
 public sealed class AegisUpstreamDefinition()
-    : GitHubPinnedReleaseDefinition("aegis", "aegis-icons/aegis-icons", "2026-07-01", "aegis-icons.zip");
+    : GitHubPinnedReleaseDefinition("aegis", "aegis-icons/aegis-icons", "2026-07-01",
+        "ec6dae28f1fa87688d691f2c43265083a1797b3c", "aegis-icons.zip",
+        "b48028973d8c8b22c941f0bbb5f95d769b9913a40952c0f60a1bbec892346013")
+{
+    private const long MaximumLegalDocumentBytes = 2L * 1024 * 1024;
+    private static readonly DateTimeOffset StableTimestamp = new(1980, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+    public override async Task CreateSourceArchiveAsync(
+        ResolvedUpstream source,
+        string destinationPath,
+        IRemoteContentClient client,
+        CancellationToken cancellationToken)
+    {
+        var rawArchive = destinationPath + ".upstream";
+        try
+        {
+            await base.CreateSourceArchiveAsync(source, rawArchive, client, cancellationToken);
+            using (SecureZipArchive.Open(rawArchive)) { }
+            var root = $"https://raw.githubusercontent.com/aegis-icons/aegis-icons/{source.Revision}";
+            var readme = await client.GetBytesAsync(root + "/README.md", MaximumLegalDocumentBytes, cancellationToken);
+            var license = await client.GetBytesAsync(root + "/LICENSE.md", MaximumLegalDocumentBytes, cancellationToken);
+
+            await using var sourceFile = File.OpenRead(rawArchive);
+            using var sourceZip = new ZipArchive(sourceFile, ZipArchiveMode.Read, leaveOpen: false);
+            await using var destinationFile = new FileStream(destinationPath, FileMode.CreateNew, FileAccess.ReadWrite,
+                FileShare.None, 81920, useAsync: true);
+            using var destinationZip = new ZipArchive(destinationFile, ZipArchiveMode.Create, leaveOpen: true);
+            foreach (var entry in sourceZip.Entries.OrderBy(x => x.FullName, StringComparer.Ordinal))
+            {
+                var output = destinationZip.CreateEntry(entry.FullName, CompressionLevel.Optimal);
+                output.LastWriteTime = StableTimestamp;
+                await using var inputStream = entry.Open();
+                await using var outputStream = output.Open();
+                await inputStream.CopyToAsync(outputStream, cancellationToken);
+            }
+            await WriteEntryAsync(destinationZip, "README-UPSTREAM-AEGIS.md", readme, cancellationToken);
+            await WriteEntryAsync(destinationZip, "LICENSE-UPSTREAM-AEGIS.md", license, cancellationToken);
+        }
+        finally
+        {
+            if (File.Exists(rawArchive)) File.Delete(rawArchive);
+        }
+    }
+
+    private static async Task WriteEntryAsync(
+        ZipArchive archive,
+        string name,
+        byte[] content,
+        CancellationToken cancellationToken)
+    {
+        var entry = archive.CreateEntry(name, CompressionLevel.Optimal);
+        entry.LastWriteTime = StableTimestamp;
+        await using var stream = entry.Open();
+        await stream.WriteAsync(content, cancellationToken);
+    }
+}
 
 public sealed class SimpleIconsUpstreamDefinition()
-    : GitHubPinnedReleaseDefinition("simple-icons", "simple-icons/simple-icons", "16.34.0", null);
+    : GitHubPinnedReleaseDefinition("simple-icons", "simple-icons/simple-icons", "16.34.0",
+        "dde88ab37611285a2bf1a7883c62be7e479794ba", null,
+        "795fbfcefcd1ea36b1ca67a81bb25a1e47c2f489653e4e5bb5e111f5420dbc9c");
 
 public sealed partial class DashboardIconsUpstreamDefinition : IUpstreamDefinition
 {
@@ -64,6 +141,7 @@ public sealed partial class DashboardIconsUpstreamDefinition : IUpstreamDefiniti
     private static readonly DateTimeOffset StableTimestamp = new(1980, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
     public string Id => "dashboard-icons";
+    public string? SupportedIdentity => SupportedRevision;
 
     public Task<ResolvedUpstream> ResolveSupportedAsync(IRemoteContentClient client, CancellationToken cancellationToken)
     {
@@ -144,6 +222,8 @@ public sealed partial class DashboardIconsUpstreamDefinition : IUpstreamDefiniti
                 CreateProviderMetadata(document.RootElement, included, skipped), cancellationToken);
             var license = await client.GetBytesAsync(root + "/LICENSE", 1024 * 1024, cancellationToken);
             await WriteEntryAsync(archive, "LICENSE", license, cancellationToken);
+            var readme = await client.GetBytesAsync(root + "/README.md", 2 * 1024 * 1024, cancellationToken);
+            await WriteEntryAsync(archive, "README.md", readme, cancellationToken);
             await WriteSkippedReportAsync(diagnosticsDirectory, source, skipped, cancellationToken);
         }
     }

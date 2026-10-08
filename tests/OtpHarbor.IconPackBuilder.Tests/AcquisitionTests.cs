@@ -58,6 +58,21 @@ public sealed class AcquisitionTests
     }
 
     [Fact]
+    public async Task OfflineDoesNotSilentlyUseCacheFromAnotherSupportedIdentity()
+    {
+        using var fixture = new TestArchive(new Dictionary<string, string> { ["content.txt"] = "fixture" });
+        var cache = fixture.FilePath("cache");
+        using (var first = new SourceAcquirer([new CopyingDefinition("aegis", "v7", fixture.Path)], new StubRemoteClient()))
+            await first.AcquireAsync(new Dictionary<string, string>(), new SourceAcquisitionOptions(cache), default);
+        using var upgraded = new SourceAcquirer([new CopyingDefinition("aegis", "v8", fixture.Path)], new StubRemoteClient());
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => upgraded.AcquireAsync(
+            new Dictionary<string, string>(), new SourceAcquisitionOptions(cache, Offline: true), default));
+
+        Assert.Contains("offline mode", exception.Message);
+    }
+
+    [Fact]
     public async Task ExplicitLocalOverrideTakesPrecedenceOverNetworkAndCache()
     {
         using var fixture = new TestArchive(new Dictionary<string, string> { ["content.txt"] = "fixture" });
@@ -143,10 +158,32 @@ public sealed class AcquisitionTests
         var simple = await new SimpleIconsUpstreamDefinition().ResolveSupportedAsync(client, default);
 
         Assert.Equal("2026-07-01", aegis.Version);
+        Assert.Equal("ec6dae28f1fa87688d691f2c43265083a1797b3c", aegis.Revision);
+        Assert.Equal("b48028973d8c8b22c941f0bbb5f95d769b9913a40952c0f60a1bbec892346013", aegis.ExpectedDownloadSha256);
+        Assert.EndsWith(aegis.Revision!, aegis.SourceUrl, StringComparison.Ordinal);
         Assert.Equal("https://github.com/aegis-icons/aegis-icons/releases/download/2026-07-01/aegis-icons.zip", aegis.DownloadUrl);
         Assert.Equal("16.34.0", simple.Version);
+        Assert.Equal("dde88ab37611285a2bf1a7883c62be7e479794ba", simple.Revision);
+        Assert.Equal("795fbfcefcd1ea36b1ca67a81bb25a1e47c2f489653e4e5bb5e111f5420dbc9c", simple.ExpectedDownloadSha256);
         Assert.Equal("https://codeload.github.com/simple-icons/simple-icons/zip/refs/tags/16.34.0", simple.DownloadUrl);
         Assert.Empty(client.Calls);
+    }
+
+    [Fact]
+    public async Task PinnedReleaseHashMismatchIsRejected()
+    {
+        using var fixture = new TestArchive(new Dictionary<string, string> { ["content.txt"] = "different" });
+        var definition = new SimpleIconsUpstreamDefinition();
+        var source = await definition.ResolveSupportedAsync(new StubRemoteClient(), default);
+        var client = new StubRemoteClient(new Dictionary<string, byte[]>
+        {
+            [source.DownloadUrl] = await File.ReadAllBytesAsync(fixture.Path)
+        });
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => definition.CreateSourceArchiveAsync(
+            source, fixture.FilePath("download.zip"), client, default));
+
+        Assert.Contains("SHA-256 mismatch", exception.Message);
     }
 
     [Fact]
@@ -159,7 +196,8 @@ public sealed class AcquisitionTests
         {
             [root + "/metadata.json"] = Bytes("{\"alpha\":{\"base\":\"svg\"},\"png-only\":{\"base\":\"png\"}}"),
             [root + "/svg/alpha.svg"] = Bytes(TestData.Svg),
-            [root + "/LICENSE"] = Bytes("fixture license")
+            [root + "/LICENSE"] = Bytes("fixture license"),
+            [root + "/README.md"] = Bytes("fixture readme")
         });
         var definition = new DashboardIconsUpstreamDefinition();
         var resolved = await definition.ResolveSupportedAsync(client, default);
@@ -171,7 +209,7 @@ public sealed class AcquisitionTests
         Assert.All(client.Calls, url => Assert.StartsWith(root, url, StringComparison.Ordinal));
         using var file = File.OpenRead(destination);
         using var zip = new ZipArchive(file, ZipArchiveMode.Read);
-        Assert.Equal(["upstream-metadata.json", "svg/alpha.svg", "metadata.json", "LICENSE"], zip.Entries.Select(x => x.FullName));
+        Assert.Equal(["upstream-metadata.json", "svg/alpha.svg", "metadata.json", "LICENSE", "README.md"], zip.Entries.Select(x => x.FullName));
         Assert.DoesNotContain(client.Calls, x => x.Contains("png-only", StringComparison.Ordinal));
         Assert.All(zip.Entries, entry => Assert.Equal(1980, entry.LastWriteTime.Year));
     }
@@ -189,7 +227,8 @@ public sealed class AcquisitionTests
             [root + "/svg/alpha.svg"] = Bytes(TestData.Svg),
             [root + "/svg/anchor.svg"] = new byte[1024 * 1024 + 1],
             [root + "/svg/unsafe.svg"] = Bytes("<svg xmlns=\"http://www.w3.org/2000/svg\"><script/><path d=\"M0 0h1v1z\"/></svg>"),
-            [root + "/LICENSE"] = Bytes("fixture license")
+            [root + "/LICENSE"] = Bytes("fixture license"),
+            [root + "/README.md"] = Bytes("fixture readme")
         }, new HashSet<string>(StringComparer.Ordinal) { missingUrl });
         var source = new ResolvedUpstream("dashboard-icons", sha, null, sha,
             $"https://github.com/homarr-labs/dashboard-icons/commit/{sha}", root);
@@ -228,6 +267,7 @@ public sealed class AcquisitionTests
     private sealed class CopyingDefinition(string id, string identity, string sourceArchive) : IUpstreamDefinition
     {
         public string Id { get; } = id;
+        public string? SupportedIdentity => identity;
         public int ResolveCount { get; private set; }
         public int CreateCount { get; private set; }
         public Exception? CreateFailure { get; init; }

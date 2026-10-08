@@ -9,6 +9,7 @@ public sealed class MappingTests
 
         Assert.NotEmpty(mappings.CanonicalBrands);
         Assert.NotEmpty(mappings.SourceOverrides);
+        Assert.NotNull(mappings.EffectiveRightsOverrides);
     }
 
     [Fact]
@@ -64,6 +65,25 @@ public sealed class MappingTests
         var mappings = await MappingLoader.LoadAsync(directory);
 
         Assert.Equal("#AABBCC", Assert.Single(mappings.CanonicalBrands).BackgroundColor);
+    }
+
+    [Fact]
+    public async Task RightsAssessmentsRequireRecognizedStatusAndHttpsEvidence()
+    {
+        using var fixture = new TestArchive(new Dictionary<string, string> { ["placeholder"] = "x" });
+        var directory = Path.Combine(fixture.DirectoryPath, "mappings");
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(Path.Combine(directory, "canonical-brands.json"), "{\"version\":1,\"brands\":[]}");
+        await File.WriteAllTextAsync(Path.Combine(directory, "issuer-aliases.json"), "{\"version\":1,\"aliases\":{}}");
+        await File.WriteAllTextAsync(Path.Combine(directory, "source-overrides.json"), "{\"version\":1,\"overrides\":{}}");
+        await File.WriteAllTextAsync(Path.Combine(directory, "rights-assessments.json"),
+            "{\"version\":1,\"assessments\":{\"aegis/Example\":{\"status\":\"attribution-required\",\"licenseType\":\"CC-BY-4.0\",\"evidenceUrl\":\"https://example.test/evidence\"}}}");
+
+        var mappings = await MappingLoader.LoadAsync(directory);
+
+        var assessment = Assert.Single(mappings.EffectiveRightsOverrides).Value;
+        Assert.Equal(RightsStatus.AttributionRequired, assessment.Status);
+        Assert.Equal("CC-BY-4.0", assessment.LicenseType);
     }
 
     internal static string FindRepositoryDirectory(string child, string expectedFile)

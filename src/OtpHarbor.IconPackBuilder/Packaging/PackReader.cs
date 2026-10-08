@@ -10,18 +10,22 @@ public static class PackReader
 {
     public static async Task<ReadPack> ReadAndValidateAsync(string path, CancellationToken cancellationToken = default)
     {
-        using var archive = SecureZipArchive.Open(path, new ArchiveLimits(MaxEntries: 50_000));
+        const long maximumPackJsonBytes = 128L * 1024 * 1024;
+        using var archive = SecureZipArchive.Open(path, new ArchiveLimits(
+            MaxEntries: 100_000,
+            MaxEntryBytes: maximumPackJsonBytes,
+            MaxUncompressedBytes: 512L * 1024 * 1024));
         var packPath = archive.FindRequired("pack.json");
         PackDocument document;
         try
         {
-            document = JsonSerializer.Deserialize<PackDocument>(await archive.ReadAsync(packPath, 20 * 1024 * 1024, cancellationToken), PackSerializer.JsonOptions)
+            document = JsonSerializer.Deserialize<PackDocument>(await archive.ReadAsync(packPath, maximumPackJsonBytes, cancellationToken), PackSerializer.JsonOptions)
                 ?? throw new InputValidationException("pack.json is empty.");
         }
         catch (JsonException ex) { throw new InputValidationException($"Malformed pack.json: {ex.Message}"); }
         var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
         foreach (var filePath in archive.Paths.Where(x => x != packPath).OrderBy(x => x, StringComparer.Ordinal))
-            files[filePath] = await archive.ReadAsync(filePath, cancellationToken: cancellationToken);
+            files[filePath] = await archive.ReadAsync(filePath, 1_048_576, cancellationToken);
         Validate(document, files);
         return new ReadPack(document, files);
     }

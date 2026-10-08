@@ -133,6 +133,19 @@ otp-harbor-icons.visual-report.json
 
 The visual report contains per-brand source and normalized palettes, operations, and pixel-comparison metrics. It is not part of format 1 and is not an import input. A successful catalog has `unresolvedFailures: 0`.
 
+## Rights evidence report
+
+A successful build also writes otp-harbor-icons.rights-report.json. It records
+the selected provider/source ID, narrowly defined evidence status, license type
+and evidence URL where available, and the active rights policy. It contains
+notLegalClearance: true because automated classification cannot determine
+trademark use, endorsement, copyright exceptions, jurisdiction, or compliance
+for a concrete use.
+
+The same status, basis, and evidence fields are copied into selected-source and
+source-reference metadata. This is additive format-1 metadata and does not
+change provider-independent brand resolution.
+
 ## Validation requirements
 
 A compatible importer should reject the complete archive without changing previously installed data when any of these conditions occurs:
@@ -151,7 +164,11 @@ Validation and installation should be transactional: fully stage and validate th
 
 ## Licensing and provenance
 
-The archive preserves source revisions, hashes, metadata, selected-source provenance, and available license or attribution files. These records must remain associated with an installed or redistributed pack.
+The archive preserves source revisions, hashes, metadata, selected-source
+provenance, and recognized license, credit, disclaimer, README, attribution,
+or trademark files available in the pinned source snapshots. Preservation does
+not guarantee that upstream supplied every notice legally required for an
+individual asset.
 
 Repository licenses do not necessarily grant trademark rights for the brands depicted by individual icons. Consumers remain responsible for applicable licenses, attribution requirements, trademark policies, and brand guidelines.
 

@@ -289,7 +289,7 @@ public static class CliApplication
         await output.WriteLineAsync("OTP Harbor Icon Pack Builder");
         await output.WriteLineAsync("----------------------------");
         await output.WriteLineAsync();
-        await output.WriteLineAsync("The latest supported Aegis Icons, Simple Icons, and Dashboard Icons sources will be merged.");
+        await output.WriteLineAsync("The tested Aegis Icons, Simple Icons, and Dashboard Icons sources pinned to this builder release will be merged.");
         await output.WriteLineAsync();
         await output.WriteLineAsync("Output:");
         await output.WriteLineAsync($"  {Path.GetFullPath(normalizedDefault)}");

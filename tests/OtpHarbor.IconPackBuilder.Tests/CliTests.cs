@@ -60,6 +60,7 @@ public sealed class CliTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.True(File.Exists(outputPath));
+        Assert.Contains("sources pinned to this builder release", result.Stdout);
         Assert.Contains("Use this location? [Y/n]", result.Stdout);
         Assert.Contains("100.0%", result.Stdout);
         Assert.Contains("+ [====================]", result.Stdout);

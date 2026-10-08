@@ -60,7 +60,7 @@ No-argument execution must NOT show help and must NOT return an input-error code
 
 The normal workflow must:
 
-1. resolve the latest supported upstream version/revision of all three providers;
+1. resolve the tested upstream version/revision pinned for all three providers;
 2. download the required metadata and SVG assets;
 3. parse all three sources;
 4. merge them into one canonical brand catalog;
@@ -72,7 +72,7 @@ The normal workflow must:
 
 ## Aegis Icons
 
-Automatically resolve the latest supported Aegis icon-pack release.
+Automatically resolve the tested Aegis icon-pack release pinned by this builder version.
 
 Prefer the official Aegis icon-pack distribution/archive intended for importing icons rather than downloading arbitrary repository contents.
 
@@ -721,7 +721,7 @@ Aim for a user experience approximately like:
 OTP Harbor Icon Pack Builder
 ────────────────────────────
 
-The latest supported icon sources will be downloaded and merged:
+The tested icon sources pinned to this builder release will be downloaded and merged:
 
   Aegis Icons
   Simple Icons
@@ -963,7 +963,7 @@ and:
 OtpHarbor.IconPackBuilder build
 ```
 
-Explain that the builder automatically downloads the latest supported icon sources and produces:
+Explain that the builder automatically downloads the tested icon sources pinned to its release and produces:
 
 ```text
 otp-harbor-icons.otphicons

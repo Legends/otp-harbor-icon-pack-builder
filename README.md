@@ -1,6 +1,6 @@
 # OTP Harbor Icon Pack Builder
 
-OTP Harbor Icon Pack Builder creates one local `.otphicons` file from the latest supported Aegis Icons, Simple Icons, and Dashboard Icons sources. It downloads the source material only while you build the pack; no third-party icon collection is bundled with the executable or hosted in this repository.
+OTP Harbor Icon Pack Builder creates one local `.otphicons` file from tested Aegis Icons, Simple Icons, and Dashboard Icons sources pinned to each builder release. It downloads the source material only while you build the pack; no third-party icon collection is bundled with the executable or hosted in this repository.
 
 ## Download and run on Windows
 

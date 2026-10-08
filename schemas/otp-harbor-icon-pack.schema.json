@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://otp-harbor.example/schemas/otp-harbor-icon-pack-v1.schema.json",
+  "title": "OTP Harbor Icon Pack",
+  "description": "Provider-independent metadata stored as pack.json in an .otphicons container.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["formatVersion", "packId", "name", "sources", "brands", "issuerAliases"],
+  "properties": {
+    "formatVersion": { "const": 1 },
+    "packId": { "$ref": "#/$defs/id" },
+    "name": { "type": "string", "minLength": 1 },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/packSource" }
+    },
+    "brands": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/brand" }
+    },
+    "issuerAliases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "brandId"],
+        "properties": {
+          "key": { "type": "string", "minLength": 1 },
+          "brandId": { "$ref": "#/$defs/id" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": { "type": ["string", "null"] }
+    },
+    "packSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "inputFileName", "sha256", "version", "revision", "sourceUrl", "metadata", "licenseFiles"],
+      "properties": {
+        "provider": { "$ref": "#/$defs/id" },
+        "inputFileName": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "version": { "type": ["string", "null"] },
+        "revision": { "type": ["string", "null"] },
+        "sourceUrl": { "type": ["string", "null"] },
+        "metadata": { "$ref": "#/$defs/metadata" },
+        "licenseFiles": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^licenses/" } }
+      }
+    },
+    "sourceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "sourceId", "metadata"],
+      "properties": {
+        "provider": { "$ref": "#/$defs/id" },
+        "sourceId": { "type": "string", "minLength": 1 },
+        "metadata": { "$ref": "#/$defs/metadata" }
+      }
+    },
+    "brand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "displayName", "backgroundColor", "icon", "issuerAliases", "selectedSource", "sources"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "displayName": { "type": "string", "minLength": 1 },
+        "backgroundColor": { "type": "string", "pattern": "^#[0-9A-F]{6}$" },
+        "icon": { "type": "string", "pattern": "^icons/[a-z0-9]+(?:-[a-z0-9]+)*\\.svg$" },
+        "issuerAliases": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "selectedSource": { "$ref": "#/$defs/sourceReference" },
+        "sources": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/sourceReference" } }
+      }
+    }
+  }
+}

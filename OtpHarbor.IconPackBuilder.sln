@@ -1,0 +1,25 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OtpHarbor.IconPackBuilder", "src\OtpHarbor.IconPackBuilder\OtpHarbor.IconPackBuilder.csproj", "{B9C7584A-88CC-4317-82A3-9FFCB6E53B2A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OtpHarbor.IconPackBuilder.Tests", "tests\OtpHarbor.IconPackBuilder.Tests\OtpHarbor.IconPackBuilder.Tests.csproj", "{5D4582AF-4C77-497A-B26C-A0349D41559D}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B9C7584A-88CC-4317-82A3-9FFCB6E53B2A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B9C7584A-88CC-4317-82A3-9FFCB6E53B2A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B9C7584A-88CC-4317-82A3-9FFCB6E53B2A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B9C7584A-88CC-4317-82A3-9FFCB6E53B2A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5D4582AF-4C77-497A-B26C-A0349D41559D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5D4582AF-4C77-497A-B26C-A0349D41559D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5D4582AF-4C77-497A-B26C-A0349D41559D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5D4582AF-4C77-497A-B26C-A0349D41559D}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

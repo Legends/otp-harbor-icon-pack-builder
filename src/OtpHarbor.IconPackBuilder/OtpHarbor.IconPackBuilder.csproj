@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>OtpHarbor.IconPackBuilder</AssemblyName>
+    <RootNamespace>OtpHarbor.IconPackBuilder</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="..\..\mappings\*.json" Link="mappings\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\schemas\*.json" Link="schemas\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="OtpHarbor.IconPackBuilder.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Svg.Skia" Version="5.2.3" />
+  </ItemGroup>
+</Project>

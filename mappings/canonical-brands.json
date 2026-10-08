@@ -1,0 +1,284 @@
+{
+  "version": 1,
+  "brands": [
+    {
+      "id": "7zip",
+      "displayName": "7zip",
+      "aliases": ["7zip", "7-Zip"],
+      "backgroundColor": "#FFFFFF",
+      "matches": [
+        { "provider": "dashboard-icons", "sourceId": "7zip" },
+        { "provider": "simple-icons", "sourceId": "7zip" }
+      ]
+    },
+    {
+      "id": "amazon",
+      "displayName": "Amazon",
+      "aliases": ["Amazon"],
+      "matches": [
+        { "provider": "aegis", "sourceId": "Amazon" },
+        { "provider": "dashboard-icons", "sourceId": "amazon" },
+        { "provider": "simple-icons", "sourceId": "amazon" }
+      ]
+    },
+    {
+      "id": "amazon-web-services",
+      "displayName": "Amazon Web Services",
+      "aliases": ["Amazon Web Services", "Amazon AWS", "AWS"],
+      "matches": [
+        { "provider": "aegis", "sourceId": "Amazon Web Services" },
+        { "provider": "aegis", "sourceId": "AWS" },
+        { "provider": "dashboard-icons", "sourceId": "aws" },
+        { "provider": "simple-icons", "sourceId": "amazonwebservices" }
+      ]
+    },
+    {
+      "id": "att",
+      "displayName": "AT&T",
+      "aliases": ["AT&T", "AT and T", "At T"],
+      "matches": [
+        { "provider": "dashboard-icons", "sourceId": "at-t" },
+        { "provider": "simple-icons", "sourceId": "atandt" }
+      ]
+    },
+    {
+      "id": "bosch",
+      "displayName": "Bosch",
+      "aliases": ["Bosch"],
+      "matches": [
+        { "provider": "aegis", "sourceId": "Bosch" },
+        { "provider": "dashboard-icons", "sourceId": "bosch" },
+        { "provider": "simple-icons", "sourceId": "bosch" }
+      ]
+    },
+    {
+      "id": "artifact-hub",
+      "displayName": "Artifact Hub",
+      "aliases": ["Artifact Hub", "ArtifactHub"],
+      "matches": [
+        { "provider": "dashboard-icons", "sourceId": "artifacthub" },
+        { "provider": "simple-icons", "sourceId": "artifacthub" }
+      ]
+    },
+    {
+      "id": "bitcoin",
+      "displayName": "Bitcoin",
+      "aliases": ["Bitcoin"],
+      "backgroundColor": "#FFFFFF",
+      "matches": [
+        { "provider": "dashboard-icons", "sourceId": "bitcoin" },
+        { "provider": "simple-icons", "sourceId": "bitcoin" }
+      ]
+    },
+    {
+      "id": "burp-suite",
+      "displayName": "Burp Suite",
+      "aliases": ["Burp Suite", "BurpSuite"],
+      "matches": [
+        { "provider": "dashboard-icons", "sourceId": "burpsuite" },
+        { "provider": "simple-icons", "sourceId": "burpsuite" }
+      ]
+    },
+    {
+      "id": "change-detection",
+      "displayName": "Change Detection",
+      "aliases": ["Change Detection", "Changedetection", "ChangeDetection"],
+      "matches": [
+        { "provider": "dashboard-icons", "sourceId": "changedetection" },
+        { "provider": "simple-icons", "sourceId": "changedetection" }
+      ]
+    },
+    {
+      "id": "google-chrome",
+      "displayName": "Google Chrome",
+      "aliases": ["Chrome", "Google Chrome"],
+      "matches": [
+        { "provider": "dashboard-icons", "sourceId": "chrome" },
+        { "provider": "dashboard-icons", "sourceId": "google-chrome" },
+        { "provider": "simple-icons", "sourceId": "googlechrome" }
+      ]
+    },
+    {
+      "id": "cloud-66",
+      "displayName": "Cloud 66",
+      "aliases": ["Cloud 66", "Cloud66"],
+      "matches": [
+        { "provider": "dashboard-icons", "sourceId": "cloud66" },
+        { "provider": "simple-icons", "sourceId": "cloud66" }
+      ]
+    },
+    {
+      "id": "dotnet",
+      "displayName": ".NET",
+      "aliases": [".NET", "Dotnet", "dotnet"],
+      "matches": [
+        { "provider": "dashboard-icons", "sourceId": "dotnet" },
+        { "provider": "simple-icons", "sourceId": "dotnet" }
+      ]
+    },
+    {
+      "id": "font-awesome",
+      "displayName": "Font Awesome",
+      "aliases": ["Font Awesome", "FontAwesome", "Font Awesome Icons"],
+      "matches": [
+        { "provider": "dashboard-icons", "sourceId": "font-awesome-icons" },
+        { "provider": "dashboard-icons", "sourceId": "fontawesome" },
+        { "provider": "simple-icons", "sourceId": "fontawesome" }
+      ]
+    },
+    {
+      "id": "github",
+      "displayName": "GitHub",
+      "aliases": ["GitHub"],
+      "matches": [
+        { "provider": "aegis", "sourceId": "GitHub" },
+        { "provider": "dashboard-icons", "sourceId": "github" },
+        { "provider": "simple-icons", "sourceId": "github" }
+      ]
+    },
+    {
+      "id": "google",
+      "displayName": "Google",
+      "aliases": ["Google"],
+      "matches": [
+        { "provider": "aegis", "sourceId": "Google" },
+        { "provider": "dashboard-icons", "sourceId": "google" },
+        { "provider": "simple-icons", "sourceId": "google" }
+      ]
+    },
+    {
+      "id": "microsoft",
+      "displayName": "Microsoft",
+      "aliases": ["Microsoft"],
+      "matches": [
+        { "provider": "aegis", "sourceId": "Microsoft" },
+        { "provider": "dashboard-icons", "sourceId": "microsoft" },
+        { "provider": "simple-icons", "sourceId": "microsoft" }
+      ]
+    },
+    {
+      "id": "microsoft-365",
+      "displayName": "Microsoft 365",
+      "aliases": ["Microsoft 365", "Office 365", "M365"],
+      "matches": [
+        { "provider": "aegis", "sourceId": "Microsoft 365" },
+        { "provider": "aegis", "sourceId": "Office 365" },
+        { "provider": "dashboard-icons", "sourceId": "microsoft-365" },
+        { "provider": "simple-icons", "sourceId": "microsoft365" }
+      ]
+    },
+    {
+      "id": "microsoft-edge",
+      "displayName": "Microsoft Edge",
+      "aliases": ["Edge", "Microsoft Edge"],
+      "matches": [
+        { "provider": "dashboard-icons", "sourceId": "edge" },
+        { "provider": "dashboard-icons", "sourceId": "microsoft-edge" }
+      ]
+    },
+    {
+      "id": "o-reilly",
+      "displayName": "O'Reilly",
+      "aliases": ["O'Reilly", "Oreilly", "OReilly"],
+      "matches": [
+        { "provider": "dashboard-icons", "sourceId": "oreilly" },
+        { "provider": "simple-icons", "sourceId": "oreilly" }
+      ]
+    },
+    {
+      "id": "openai",
+      "displayName": "OpenAI",
+      "aliases": ["OpenAI"],
+      "backgroundColor": "#FFFFFF",
+      "matches": [
+        { "provider": "aegis", "sourceId": "OpenAI" },
+        { "provider": "dashboard-icons", "sourceId": "openai" }
+      ]
+    },
+    {
+      "id": "paramount-plus",
+      "displayName": "Paramount+",
+      "aliases": ["Paramount+", "Paramount Plus", "ParamountPlus"],
+      "matches": [
+        { "provider": "dashboard-icons", "sourceId": "paramount-plus" },
+        { "provider": "simple-icons", "sourceId": "paramountplus" }
+      ]
+    },
+    {
+      "id": "read-the-docs",
+      "displayName": "Read the Docs",
+      "aliases": ["Read the Docs", "ReadTheDocs"],
+      "matches": [
+        { "provider": "dashboard-icons", "sourceId": "readthedocs" },
+        { "provider": "simple-icons", "sourceId": "readthedocs" }
+      ]
+    },
+    {
+      "id": "sailfish-os",
+      "displayName": "Sailfish OS",
+      "aliases": ["Sailfish OS", "SailfishOS"],
+      "matches": [
+        { "provider": "dashboard-icons", "sourceId": "sailfishos" },
+        { "provider": "simple-icons", "sourceId": "sailfishos" }
+      ]
+    },
+    {
+      "id": "siemens",
+      "displayName": "Siemens",
+      "aliases": ["Siemens"],
+      "matches": [
+        { "provider": "aegis", "sourceId": "Siemens" },
+        { "provider": "dashboard-icons", "sourceId": "siemens" },
+        { "provider": "simple-icons", "sourceId": "siemens" }
+      ]
+    },
+    {
+      "id": "sony",
+      "displayName": "Sony",
+      "aliases": ["Sony"],
+      "backgroundColor": "#FFFFFF",
+      "matches": [
+        { "provider": "aegis", "sourceId": "Sony" },
+        { "provider": "simple-icons", "sourceId": "sony" }
+      ]
+    },
+    {
+      "id": "sumo-logic",
+      "displayName": "Sumo Logic",
+      "aliases": ["Sumo Logic", "SumoLogic"],
+      "matches": [
+        { "provider": "aegis", "sourceId": "SumoLogic" },
+        { "provider": "simple-icons", "sourceId": "sumologic" }
+      ]
+    },
+    {
+      "id": "the-odin-project",
+      "displayName": "The Odin Project",
+      "aliases": ["The Odin Project", "TheOdinProject"],
+      "matches": [
+        { "provider": "dashboard-icons", "sourceId": "theodinproject" },
+        { "provider": "simple-icons", "sourceId": "theodinproject" }
+      ]
+    },
+    {
+      "id": "y-combinator",
+      "displayName": "Y Combinator",
+      "aliases": ["Y Combinator", "YCombinator"],
+      "matches": [
+        { "provider": "dashboard-icons", "sourceId": "ycombinator" },
+        { "provider": "simple-icons", "sourceId": "ycombinator" }
+      ]
+    },
+    {
+      "id": "zabka",
+      "displayName": "Żabka",
+      "aliases": ["Żabka", "Zabka"],
+      "matches": [
+        { "provider": "aegis", "sourceId": "Zabka" },
+        { "provider": "aegis", "sourceId": "Żabka" },
+        { "provider": "dashboard-icons", "sourceId": "zabka" },
+        { "provider": "simple-icons", "sourceId": "zabka" }
+      ]
+    }
+  ]
+}

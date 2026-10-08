@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "overrides": {
+    "microsoft-edge": {
+      "provider": "dashboard-icons",
+      "sourceId": "microsoft-edge"
+    },
+    "sony": {
+      "provider": "simple-icons",
+      "sourceId": "sony"
+    }
+  }
+}

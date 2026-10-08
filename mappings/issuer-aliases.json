@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "aliases": {
+    "amazon-web-services": ["AWS", "Amazon AWS"],
+    "microsoft-365": ["Office 365", "M365"]
+  }
+}

@@ -25,6 +25,16 @@ out/
 sources/
 temp/
 tmp/
+*.zip
+*.conflicts.json
+*.visual-report.json
+
+# Extracted third-party source trees and local fixtures
+third-party/
+vendor-icons/
+test-results/
+.cache/
+cache/
 
 # OS
 Thumbs.db

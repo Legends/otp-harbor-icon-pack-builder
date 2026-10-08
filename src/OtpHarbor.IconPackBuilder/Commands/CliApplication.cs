@@ -88,7 +88,6 @@ public static class CliApplication
                 throw new InputValidationException($"Output file already exists: {fullOutput}. Use --force to replace it.");
             }
 
-            var mappingsPath = options.MappingsPath ?? FindDefaultMappings();
             var cachePath = Path.GetFullPath(options.CachePath ?? defaultCachePath());
             if (useInteractivePrompts) PrintHeader(output, fullOutput);
             await output.WriteLineAsync(options.Offline
@@ -112,7 +111,9 @@ public static class CliApplication
                 catalogs.Add(await providerLookup[sourceInput.Provider].LoadAsync(sourceInput, cancellationToken));
             }
 
-            var mappings = await MappingLoader.LoadAsync(mappingsPath, cancellationToken);
+            var mappings = options.MappingsPath is null
+                ? await MappingLoader.LoadDefaultAsync(cancellationToken)
+                : await MappingLoader.LoadAsync(options.MappingsPath, cancellationToken);
             PackBuildResult result;
             var progress = new CatalogProgressRenderer(output, useInteractivePrompts);
             try
@@ -361,12 +362,6 @@ public static class CliApplication
             .OrderBy(x => x, StringComparer.Ordinal).ToArray();
         if (missing.Length > 0)
             throw new InputValidationException($"Acquisition did not provide required source(s): {string.Join(", ", missing)}.");
-    }
-
-    private static string FindDefaultMappings()
-    {
-        var local = Path.Combine(Directory.GetCurrentDirectory(), "mappings");
-        return Directory.Exists(local) ? local : Path.Combine(AppContext.BaseDirectory, "mappings");
     }
 
     private static async Task WriteConflictReportAsync(string path, IReadOnlyList<BuildConflict> conflicts, CancellationToken cancellationToken)

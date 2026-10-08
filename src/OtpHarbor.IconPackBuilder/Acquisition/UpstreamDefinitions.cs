@@ -197,7 +197,7 @@ public sealed partial class DashboardIconsUpstreamDefinition : IUpstreamDefiniti
         }
         catch (InputValidationException ex)
         {
-            return new SvgDownload(slug, data, $"SVG failed OTP Harbor validation: {ex.Message}");
+            return new SvgDownload(slug, data, $"SVG failed pack-format validation: {ex.Message}");
         }
     }
 
@@ -248,7 +248,7 @@ public sealed partial class DashboardIconsUpstreamDefinition : IUpstreamDefiniti
             .AppendLine()
             .AppendLine($"Pinned revision: `{source.Revision}`")
             .AppendLine()
-            .AppendLine("These untrusted upstream SVGs were excluded from the generated OTP Harbor pack.")
+            .AppendLine("These untrusted upstream SVGs were excluded from the generated icon pack.")
             .AppendLine()
             .AppendLine("| Icon path | Size (bytes) | Cached diagnostic | Reason |")
             .AppendLine("|---|---:|---|---|");

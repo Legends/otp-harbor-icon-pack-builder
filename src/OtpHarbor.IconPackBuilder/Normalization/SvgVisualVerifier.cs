@@ -124,7 +124,7 @@ internal static class SvgVisualVerifier
         var y = target.Top + (target.Height - bounds.Height * scale) / 2;
         canvas.Save();
         // Compare the icon viewport, not filter/shadow output that overflows its
-        // allotted icon tile. OTP Harbor clips icons to this same square.
+        // allotted icon tile. Compatible importers clip icons to this same square.
         canvas.ClipRect(target);
         canvas.Translate(x, y);
         canvas.Scale(scale);

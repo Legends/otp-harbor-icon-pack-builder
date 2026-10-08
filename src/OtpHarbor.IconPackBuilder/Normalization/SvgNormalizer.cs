@@ -106,7 +106,7 @@ public static partial class SvgNormalizer
         }))
             output.Save(writer);
         if (result.Length > MaximumSvgBytes)
-            throw new InputValidationException("Normalized SVG exceeds the 1 MiB application limit.");
+            throw new InputValidationException("Normalized SVG exceeds the 1 MiB format limit.");
         var normalizedBytes = result.ToArray();
         SvgVisualMetrics visualMetrics;
         try
@@ -114,10 +114,10 @@ public static partial class SvgNormalizer
             visualMetrics = SvgVisualVerifier.Compare(input, normalizedBytes, normalizedBackground);
             if (!visualMetrics.Resolved)
             {
-                // Prefer enough path-raster detail to remain crisp when OTP Harbor
-                // renders above the 24 px comparison size. Thin or heavily
+                // Prefer enough path-raster detail to remain crisp when rendered
+                // above the 24 px comparison size. Thin or heavily
                 // antialiased artwork can require an exact-size fallback to pass
-                // the application's strict visual-equivalence gate.
+                // the format's strict visual-equivalence gate.
                 foreach (var rasterSize in new[] { 96, 48, 24 })
                 {
                     var rasterBytes = SvgVisualVerifier.RasterFlatten(input, normalizedBackground, rasterSize);
@@ -139,7 +139,7 @@ public static partial class SvgNormalizer
         if (!visualMetrics.Resolved)
             throw new InputValidationException($"SVG visual verification remained unresolved (mean difference {visualMetrics.MeanAbsoluteChannelDifference}, material pixels {visualMetrics.MateriallyDifferentPixels}).");
         if (normalizedBytes.Length > MaximumSvgBytes)
-            throw new InputValidationException("Visually normalized SVG exceeds the 1 MiB application limit.");
+            throw new InputValidationException("Visually normalized SVG exceeds the 1 MiB format limit.");
         return new SvgNormalizationResult(normalizedBytes, normalizedBackground, operations.ToArray(), foregroundColors, visualMetrics);
     }
 

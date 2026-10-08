@@ -45,7 +45,9 @@ public sealed class PackTests
         using var fixture = new TestArchive(new Dictionary<string, string> { ["placeholder"] = "x" });
         var path = fixture.FilePath("schema.otphicons");
         await PackSerializer.WriteAsync(path, BuildResult());
-        var schemaPath = Path.Combine(MappingTests.FindRepositoryDirectory("schemas"), "otp-harbor-icon-pack.schema.json");
+        var schemaPath = Path.Combine(
+            MappingTests.FindRepositoryDirectory("schemas", "otp-harbor-icon-pack.schema.json"),
+            "otp-harbor-icon-pack.schema.json");
         using var schema = JsonDocument.Parse(await File.ReadAllTextAsync(schemaPath));
         Assert.Equal("https://json-schema.org/draft/2020-12/schema", schema.RootElement.GetProperty("$schema").GetString());
         Assert.Equal(1, schema.RootElement.GetProperty("properties").GetProperty("formatVersion").GetProperty("const").GetInt32());

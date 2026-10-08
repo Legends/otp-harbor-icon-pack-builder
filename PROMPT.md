@@ -2,16 +2,6 @@ Update the OTP Harbor Icon Pack Builder to use the following product workflow an
 
 Read and follow `AGENTS.md` before making changes.
 
-Also inspect the existing OTP Harbor application repository at:
-
-```text
-E:\Repos\TOTP-Manager
-```
-
-Treat that repository as the authoritative integration reference for OTP Harbor models, issuer behavior, icon handling, background-color behavior, serialization conventions, and existing icon-pack import logic.
-
-Do not guess about an OTP Harbor contract that can be verified there.
-
 # Product goal
 
 The OTP Harbor Icon Pack Builder must create one unified "best of all sources" icon pack by combining:
@@ -24,7 +14,7 @@ The normal user must not manually download any of these provider archives.
 
 The builder itself is allowed to access the network.
 
-The OTP Harbor application remains fully local-first and must not need network access for icon resolution.
+Generated packs remain fully local-first and must not need network access when consumed.
 
 The separation is:
 
@@ -42,7 +32,7 @@ OtpHarbor.IconPackBuilder
     +-- determines background color
     +-- produces one .otphicons file
 
-OTP Harbor
+Compatible importer
     |
     +-- imports the resulting .otphicons file locally
     +-- performs no network access for icon resolution
@@ -73,7 +63,7 @@ The normal workflow must:
 1. resolve the latest supported upstream version/revision of all three providers;
 2. download the required metadata and SVG assets;
 3. parse all three sources;
-4. merge them into one canonical OTP Harbor brand catalog;
+4. merge them into one canonical brand catalog;
 5. validate the resulting catalog;
 6. create one final `.otphicons` file;
 7. validate the completed pack by reopening it before making it the final output.
@@ -101,7 +91,7 @@ Do not treat generic category icons as brands.
 
 Do not prefer variation icons over primary icons unless an explicit mapping/override requires it.
 
-Aegis issuer values are especially valuable because they are designed around authenticator/2FA issuer matching.
+Aegis issuer values are especially valuable because they are designed around TOTP issuer matching.
 
 ## Simple Icons
 
@@ -269,7 +259,7 @@ This functionality is primarily for development, testing, reproducibility, and a
 
 # Unified pack behavior
 
-The tool must always aim to create one merged OTP Harbor catalog from all three providers.
+The tool must always aim to create one merged canonical catalog from all three providers.
 
 The product concept is:
 
@@ -298,7 +288,7 @@ Do not expose three separate provider packs as the normal result.
 
 # Issuer semantics
 
-OTP Harbor resolves icons using the mandatory TOTP `issuer`.
+Automatic icon lookup uses the mandatory TOTP `issuer`.
 
 The optional account name is NOT used for automatic icon matching.
 
@@ -309,7 +299,7 @@ The alias system should combine useful values from:
 - Aegis issuer data,
 - Simple Icons names/slugs/aliases,
 - Dashboard Icons names/slugs/aliases,
-- manually maintained OTP Harbor mappings.
+- manually maintained canonical mappings.
 
 Preserve original issuer aliases in pack metadata.
 
@@ -317,7 +307,7 @@ Use normalized issuer keys internally.
 
 # Canonical brand identity
 
-Canonical brand IDs belong to OTP Harbor.
+Canonical brand IDs belong to the `.otphicons` format.
 
 Do not use a provider slug as the permanent canonical ID merely because that provider wins icon selection.
 
@@ -383,7 +373,7 @@ mappings/
   source-overrides.json
 ```
 
-The canonical mapping data should support explicit equivalence between provider identities and OTP Harbor canonical IDs.
+The canonical mapping data should support explicit equivalence between provider identities and `.otphicons` canonical IDs.
 
 Seed/retain useful canonical mappings for at least:
 
@@ -427,20 +417,13 @@ Never derive provider preference implicitly from provider/catalog iteration orde
 
 The selected provider and original upstream source ID must be written into pack metadata.
 
-# Canonical visual output and application boundary
+# Canonical visual output and format boundary
 
-The builder/importer is a standalone product. No provider acquisition, provider
-parsing, source selection, SVG normalization, color extraction, merge logic, or
-pack-production code may be added to or shared as a project reference with OTP
-Harbor. OTP Harbor only validates and consumes the provider-neutral
-`.otphicons` result.
-
-Before packaging a selected upstream SVG, normalize it to the canonical
-application profile defined by:
-
-```text
-E:\Repos\TOTP-Manager\docs\security\ICON_PACK_IMPORT_CONTRACT.md
-```
+The builder is a standalone product. Provider acquisition, parsing, source
+selection, SVG normalization, color extraction, merge logic, and pack
+production remain in this repository. Compatible importers only validate and
+consume the provider-neutral `.otphicons` result described by the checked-in
+schema and `docs/ICON-PACK-FORMAT.md`.
 
 At minimum:
 
@@ -451,7 +434,7 @@ At minimum:
    path geometry;
 4. resolve CSS classes, inline styles, inherited paint, and transforms;
 5. emit explicit safe solid path fills for colored foreground layers, while an
-   intentionally omitted fill means OTP Harbor's standard foreground brush;
+   intentionally omitted fill means the format's standard foreground brush;
 6. flatten gradients, patterns, masks, filters, clipping, strokes, and opacity
    into supported path layers, or select a compatible alternate source rather
    than silently losing visible artwork;
@@ -467,7 +450,7 @@ and visible in `selectedSource`.
 
 # Background and foreground colors
 
-OTP Harbor's existing `BrandDefinition` requires a background color.
+The pack format requires a background color for every brand.
 
 `backgroundColor` must therefore be a first-class canonical brand property in the generated pack.
 
@@ -485,18 +468,18 @@ Use this deterministic precedence:
 ```
 
 The background color must be evaluated with the normalized foreground. It is
-the final OTP Harbor tile surface, not simply the first color encountered.
+the final icon tile surface, not simply the first color encountered.
 Explicit multicolor foreground layers must retain their selected-source colors,
 and the chosen background must not hide required foreground layers.
 
 Do not take an arbitrary color from another merged provider record when a different provider's icon was selected.
 
-Do not copy background extraction or provider interpretation into OTP Harbor.
-The builder/importer owns this decision and writes the final value to the
+Do not copy background extraction or provider interpretation into consumers.
+The builder owns this decision and writes the final value to the
 provider-neutral manifest. `#334155` is a last, contrast-checked fallback; do
 not use it when the selected asset contains or documents a usable background.
 
-Add deterministic visual regression checks at OTP Harbor tile size. At minimum,
+Add deterministic visual regression checks at the format's tile size. At minimum,
 cover these known failures from the October 2026 generated pack:
 
 - Bitdefender, Bitrise, and Bitwarden: background circle color expressed in an
@@ -519,8 +502,8 @@ visual-fidelity gate to every real build:
 
 1. render the selected upstream SVG with a deterministic, sandboxed reference
    renderer;
-2. render the normalized SVG using only OTP Harbor's canonical profile;
-3. compose both at OTP Harbor's 40x40 tile size with the 24x24 icon content area
+2. render the normalized SVG using only the canonical format profile;
+3. compose both at the format's 40x40 tile size with the 24x24 icon content area
    and the emitted `backgroundColor`;
 4. compare visible alpha bounds, clipping, layer order, required foreground/fill
    colors, and the final background;
@@ -575,7 +558,7 @@ licenses/
   ...
 ```
 
-OTP Harbor should only need to understand the `.otphicons` format.
+Compatible importers should only need to understand the `.otphicons` format.
 
 It should not need provider-specific Aegis/Simple Icons/Dashboard Icons parsing once the unified pack exists.
 
@@ -991,7 +974,7 @@ Document:
 - `--non-interactive`,
 - `--force`,
 - provenance/version recording,
-- the fact that OTP Harbor itself remains offline/local-first.
+- the fact that generated packs are consumed offline/local-first.
 
 Also explain that third-party trademarks/icons remain owned by their respective rights holders.
 
@@ -1014,16 +997,15 @@ Do not commit any complete third-party icon collection.
 
 Before reporting completion:
 
-1. inspect the relevant code in `E:\Repos\TOTP-Manager`;
-2. build the full solution;
-3. run all tests;
-4. run a complete end-to-end build using controlled/local test sources;
-5. verify the produced `.otphicons` can be reopened and validated;
-6. verify canonical background colors match OTP Harbor's expectations;
-7. verify alias conflicts still fail deterministically;
-8. verify the final output is one `.otphicons` file;
-9. verify no third-party source collection or generated combined pack is tracked by Git;
-10. summarize:
+1. build the full solution;
+2. run all tests;
+3. run a complete end-to-end build using controlled/local test sources;
+4. verify the produced `.otphicons` can be reopened and validated;
+5. verify canonical background colors match the documented format;
+6. verify alias conflicts still fail deterministically;
+7. verify the final output is one `.otphicons` file;
+8. verify no third-party source collection or generated combined pack is tracked by Git;
+9. summarize:
     - architecture changes,
     - acquisition strategy per provider,
     - cache locations/behavior,

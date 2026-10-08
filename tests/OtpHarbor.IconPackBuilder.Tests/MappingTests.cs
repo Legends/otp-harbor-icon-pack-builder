@@ -3,9 +3,18 @@ namespace OtpHarbor.IconPackBuilder.Tests;
 public sealed class MappingTests
 {
     [Fact]
+    public async Task DefaultMappingsAreEmbeddedForStandaloneDistribution()
+    {
+        var mappings = await MappingLoader.LoadDefaultAsync();
+
+        Assert.NotEmpty(mappings.CanonicalBrands);
+        Assert.NotEmpty(mappings.SourceOverrides);
+    }
+
+    [Fact]
     public async Task SeedMappingsContainRequiredDistinctBrands()
     {
-        var mappings = await MappingLoader.LoadAsync(FindRepositoryDirectory("mappings"));
+        var mappings = await MappingLoader.LoadAsync(FindRepositoryDirectory("mappings", "canonical-brands.json"));
         var ids = mappings.CanonicalBrands.Select(x => x.Id).ToHashSet(StringComparer.Ordinal);
         Assert.Contains("amazon", ids);
         Assert.Contains("amazon-web-services", ids);
@@ -57,13 +66,13 @@ public sealed class MappingTests
         Assert.Equal("#AABBCC", Assert.Single(mappings.CanonicalBrands).BackgroundColor);
     }
 
-    internal static string FindRepositoryDirectory(string child)
+    internal static string FindRepositoryDirectory(string child, string expectedFile)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
             var candidate = Path.Combine(directory.FullName, child);
-            if (Directory.Exists(candidate)) return candidate;
+            if (File.Exists(Path.Combine(candidate, expectedFile))) return candidate;
             directory = directory.Parent;
         }
         throw new DirectoryNotFoundException(child);

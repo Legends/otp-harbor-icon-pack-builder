@@ -6,6 +6,8 @@ namespace OtpHarbor.IconPackBuilder.Resolution;
 
 public static class MappingLoader
 {
+    private const string EmbeddedPrefix = "OtpHarbor.IconPackBuilder.Mappings.";
+
     public static async Task<MappingSet> LoadAsync(string directory, CancellationToken cancellationToken = default)
     {
         if (!Directory.Exists(directory))
@@ -19,6 +21,17 @@ public static class MappingLoader
         return new MappingSet(ParseCanonical(canonical, canonicalPath), ParseAliases(aliases, aliasesPath), ParseOverrides(overrides, overridesPath));
     }
 
+    public static async Task<MappingSet> LoadDefaultAsync(CancellationToken cancellationToken = default)
+    {
+        var canonical = await ReadEmbeddedAsync("canonical-brands.json", cancellationToken);
+        var aliases = await ReadEmbeddedAsync("issuer-aliases.json", cancellationToken);
+        var overrides = await ReadEmbeddedAsync("source-overrides.json", cancellationToken);
+        return new MappingSet(
+            ParseCanonical(canonical, "embedded:canonical-brands.json"),
+            ParseAliases(aliases, "embedded:issuer-aliases.json"),
+            ParseOverrides(overrides, "embedded:source-overrides.json"));
+    }
+
     private static async Task<JsonDocument> ReadAsync(string path, CancellationToken cancellationToken)
     {
         if (!File.Exists(path)) throw new InputValidationException($"Required mapping file does not exist: {path}");
@@ -28,6 +41,24 @@ public static class MappingLoader
             return await JsonDocument.ParseAsync(stream, new JsonDocumentOptions { MaxDepth = 32, CommentHandling = JsonCommentHandling.Disallow }, cancellationToken);
         }
         catch (JsonException ex) { throw new InputValidationException($"Malformed mapping JSON '{path}': {ex.Message}"); }
+    }
+
+    private static async Task<JsonDocument> ReadEmbeddedAsync(string fileName, CancellationToken cancellationToken)
+    {
+        var resourceName = EmbeddedPrefix + fileName;
+        await using var stream = typeof(MappingLoader).Assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InputValidationException($"Required embedded mapping does not exist: {fileName}");
+        try
+        {
+            return await JsonDocument.ParseAsync(
+                stream,
+                new JsonDocumentOptions { MaxDepth = 32, CommentHandling = JsonCommentHandling.Disallow },
+                cancellationToken);
+        }
+        catch (JsonException ex)
+        {
+            throw new InputValidationException($"Malformed embedded mapping '{fileName}': {ex.Message}");
+        }
     }
 
     private static IReadOnlyList<CanonicalBrandMapping> ParseCanonical(JsonDocument document, string path)

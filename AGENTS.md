@@ -2,7 +2,7 @@
 
 ## Project purpose
 
-OTP Harbor Icon Pack Builder creates a single normalized icon pack for OTP Harbor from user-supplied third-party icon sources.
+OTP Harbor Icon Pack Builder creates a single normalized `.otphicons` pack from user-supplied third-party icon sources.
 
 The initial supported sources are:
 
@@ -10,9 +10,9 @@ The initial supported sources are:
 - Simple Icons
 - Dashboard Icons
 
-The builder must merge these sources into one deterministic catalog that OTP Harbor can consume locally without network access.
+The builder must merge these sources into one deterministic catalog that compatible importers can consume locally without network access.
 
-The important product concept is not "three icon packs in OTP Harbor". The output is one canonical OTP Harbor icon pack with:
+The important product concept is not three independent provider packs. The output is one canonical icon pack with:
 
 - one canonical brand identity per service/brand,
 - one selected icon per canonical brand,
@@ -21,37 +21,13 @@ The important product concept is not "three icon packs in OTP Harbor". The outpu
 - licensing/attribution metadata,
 - deterministic conflict handling.
 
-OTP Harbor resolves icons from the mandatory TOTP `issuer` value. The optional account name is not part of automatic brand matching.
-
-## Existing OTP Harbor repository
-
-The existing OTP Harbor application repository is available locally at:
-
-```text
-E:\Repos\TOTP-Manager
-```
-
-Treat it as the authoritative integration reference. Before finalizing provider compatibility or the generated pack contract, inspect the relevant account/domain models, mandatory issuer handling, icon import and resolution code, JSON conventions, naming conventions, and tests. Important files include:
-
-- `TOTP.Core/Models/Account.cs`
-- `TOTP.Infrastructure/Parser/OtpAuthSupportPolicy.cs`
-- `TOTP.Infrastructure/Services/QrPayloadValidator.cs`
-- `TOTP.Infrastructure/Icons/SimpleIconsImporter.cs`
-- `TOTP.Infrastructure/Icons/AegisIconPackImporter.cs`
-- `TOTP.Infrastructure/Icons/IconImportArchive.cs`
-- `TOTP.Infrastructure/Branding/IssuerAliasResolver.cs`
-- `TOTP.Infrastructure/Services/SimpleIconsBrandIconPackService.cs`
-- `TOTP.Tests/Services/IconPackImporterTests.cs`
-- `TOTP.Tests/Services/IssuerAliasResolverTests.cs`
-- `TOTP.Tests/Services/SimpleIconsBrandIconPackServiceTests.cs`
-
-Keep this builder independent of the application assembly: reuse compatible parsing and security behavior, but do not add a project reference across repositories. Do not modify the OTP Harbor application repository unless the task explicitly requests it.
+Automatic icon lookup uses the mandatory TOTP `issuer` value. The optional account name is not part of automatic brand matching.
 
 ## Core constraints
 
-1. **OTP Harbor remains offline/local-first.**
-   - Do not add runtime network requirements to OTP Harbor.
-   - This repository builds packs outside the OTP Harbor application.
+1. **Generated packs remain local-first.**
+   - Provider downloads happen only in this user-run builder.
+   - A finished pack must not require network access when consumed.
 
 2. **Do not redistribute third-party icon collections from this repository.**
    - Do not commit generated packs containing upstream icons.
@@ -60,10 +36,10 @@ Keep this builder independent of the application assembly: reuse compatible pars
    - Generated packs are user-side build artifacts.
    - Preserve upstream license, attribution, trademark, and provenance information in generated output.
 
-3. **Canonical identity belongs to OTP Harbor.**
+3. **Canonical identity belongs to the `.otphicons` format.**
    - Never use a provider slug as the permanent identity merely because it already exists.
    - Provider names/slugs are inputs.
-   - OTP Harbor canonical IDs must be stable and provider-independent.
+   - Canonical IDs must be stable and provider-independent.
 
 4. **Issuer matching must be deterministic and conservative.**
    - Exact and normalized alias matching is preferred.
@@ -155,7 +131,7 @@ public interface IIconSourceProvider
 
 Each provider adapter is responsible only for understanding its upstream format.
 
-Provider adapters must not decide OTP Harbor canonical IDs globally.
+Provider adapters must not decide `.otphicons` canonical IDs globally.
 
 The merge/resolution layer owns canonicalization, alias merging, duplicate detection, source selection, and conflict reporting.
 
@@ -172,7 +148,7 @@ Use the Aegis pack metadata when available, especially:
 
 Prefer primary icons over variation/generic assets unless an explicit mapping says otherwise.
 
-Aegis issuer values are valuable alias candidates because the collection is curated around authenticator/2FA usage.
+Aegis issuer values are valuable alias candidates because the collection is curated around TOTP issuer matching.
 
 ### Simple Icons
 
@@ -186,7 +162,7 @@ Use upstream metadata such as:
 - license metadata,
 - brand color when available.
 
-Do not assume the Simple Icons slug should become the OTP Harbor canonical ID.
+Do not assume the Simple Icons slug should become the `.otphicons` canonical ID.
 
 ### Dashboard Icons
 
@@ -305,7 +281,7 @@ Treat mapping files as source-controlled product data.
 
 ### mappings/canonical-brands.json
 
-Use for explicit equivalence between provider identities and OTP Harbor canonical IDs.
+Use for explicit equivalence between provider identities and `.otphicons` canonical IDs.
 
 ### mappings/issuer-aliases.json
 
@@ -343,7 +319,7 @@ licenses/
 
 The output schema must have an explicit schema/format version.
 
-OTP Harbor should not need to understand Aegis, Simple Icons, or Dashboard Icons once it receives the generated pack.
+Compatible importers should not need to understand Aegis, Simple Icons, or Dashboard Icons once they receive the generated pack.
 
 ## Security requirements
 
@@ -453,12 +429,4 @@ A change is complete only when:
 - no third-party icon collection is accidentally committed,
 - documentation reflects externally visible behavior,
 - errors are actionable,
-- the result remains compatible with the local/offline OTP Harbor design.
-
-
-## Related OTP Harbor repository
-
-The existing OTP Harbor application repository is available locally at:
-
-```text
-E:\Repos\TOTP-Manager
+- the result remains compatible with the documented local/offline `.otphicons` design.

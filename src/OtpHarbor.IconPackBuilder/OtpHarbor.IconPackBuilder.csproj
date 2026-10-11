@@ -3,9 +3,9 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>OtpHarbor.IconPackBuilder</AssemblyName>
     <RootNamespace>OtpHarbor.IconPackBuilder</RootNamespace>
-    <Version>1.2.0</Version>
-    <AssemblyVersion>1.2.0.0</AssemblyVersion>
-    <FileVersion>1.2.0.0</FileVersion>
+    <Version>1.2.1</Version>
+    <AssemblyVersion>1.2.1.0</AssemblyVersion>
+    <FileVersion>1.2.1.0</FileVersion>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/Legends/otp-harbor-icon-pack-builder</RepositoryUrl>
   </PropertyGroup>
@@ -16,6 +16,7 @@
     <InternalsVisibleTo Include="OtpHarbor.IconPackBuilder.Tests" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.148.0" />
     <PackageReference Include="Svg.Skia" Version="5.2.3" />
   </ItemGroup>
 </Project>

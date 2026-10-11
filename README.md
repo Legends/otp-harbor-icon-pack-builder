@@ -5,7 +5,7 @@ OTP Harbor Icon Pack Builder creates one local `.otphicons` file from tested Aeg
 ## Download and run
 
 Open the [latest release](https://github.com/Legends/otp-harbor-icon-pack-builder/releases/latest)
-and choose the download for your computer. Starting with v1.2.0, the release
+and choose the download for your computer. Starting with v1.2.1, the release
 contains:
 
 | Platform | Download |

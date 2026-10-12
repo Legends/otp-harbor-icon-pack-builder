@@ -1,0 +1,87 @@
+name: Container validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/container-validation.yml"
+      - ".dockerignore"
+      - "docker/**"
+      - "scripts/testing/Test-GeneratedIconPack.ps1"
+      - "src/**"
+      - "tests/**"
+      - "mappings/**"
+      - "schemas/**"
+      - "Directory.Build.props"
+      - "global.json"
+      - "OtpHarbor.IconPackBuilder.sln"
+  pull_request:
+    paths:
+      - ".github/workflows/container-validation.yml"
+      - ".dockerignore"
+      - "docker/**"
+      - "scripts/testing/Test-GeneratedIconPack.ps1"
+      - "src/**"
+      - "tests/**"
+      - "mappings/**"
+      - "schemas/**"
+      - "Directory.Build.props"
+      - "global.json"
+      - "OtpHarbor.IconPackBuilder.sln"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Build and execute (Linux container)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+      - name: Build image and run solution tests
+        run: >-
+          docker build
+          --pull
+          --file docker/linux.Dockerfile
+          --tag otp-harbor-icon-pack-builder:test-linux
+          .
+      - name: Generate production icon pack
+        shell: pwsh
+        run: |
+          $containerName = "otp-harbor-icon-pack-builder-linux-${{ github.run_id }}"
+          "CONTAINER_NAME=$containerName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          docker run `
+            --name $containerName `
+            otp-harbor-icon-pack-builder:test-linux `
+            build `
+            --output /output/otp-harbor-icons.otphicons `
+            --non-interactive `
+            --force
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $outputDirectory = Join-Path $env:RUNNER_TEMP 'container-output-linux'
+          New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
+          docker cp "${containerName}:/output/." $outputDirectory
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          "PACK_PATH=$(Join-Path $outputDirectory 'otp-harbor-icons.otphicons')" |
+            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Validate generated archive and reports
+        shell: pwsh
+        run: ./scripts/testing/Test-GeneratedIconPack.ps1 -PackPath $env:PACK_PATH
+      - name: Remove generated third-party artifacts
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:CONTAINER_NAME) {
+            docker rm --force $env:CONTAINER_NAME 2>$null
+          }
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'container-output-linux') `
+            -Recurse -Force -ErrorAction SilentlyContinue

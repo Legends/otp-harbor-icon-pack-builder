@@ -49,7 +49,7 @@ Linux desktop behavior differs by distribution. The archive preserves the
 launcher and executable permissions, but a file manager may still require you
 to mark the launcher as trusted before it will run.
 
-The finished file is normally:
+**The finished icon pack file is by default located at:**
 
 ```text
 Windows: C:\Users\<you>\Downloads\otp-harbor-icons.otphicons

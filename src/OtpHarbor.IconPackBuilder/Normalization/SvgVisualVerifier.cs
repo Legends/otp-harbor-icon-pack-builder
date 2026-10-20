@@ -28,6 +28,30 @@ internal static class SvgVisualVerifier
     {
         using var sourceBitmap = RenderTile(source, backgroundColor);
         using var normalizedBitmap = RenderTile(normalized, backgroundColor);
+        return CompareBitmaps(sourceBitmap, normalizedBitmap);
+    }
+
+    public static SvgVisualMetrics CompareCanonicalToRuntimePng(
+        byte[] canonicalSvg,
+        byte[] runtimePng,
+        string backgroundColor)
+    {
+        var profiledSvg = RuntimeIconRenderer.ApplyRuntimePaintProfile(canonicalSvg);
+        using var canonical = RenderContent(profiledSvg, RuntimeIconRenderer.Width, SKColors.Transparent);
+        using var runtime = DeterministicPng.DecodeAndValidate(runtimePng,
+            RuntimeIconRenderer.Width, RuntimeIconRenderer.Height, "runtime visual verification");
+        if (!HasVisiblePixel(canonical) || !HasVisiblePixel(runtime))
+            return new SvgVisualMetrics(double.MaxValue, TileSize * TileSize, TileSize * TileSize,
+                [], [], false);
+        var alphaMismatch = !AlphaPixelsMatch(canonical, runtime);
+        using var canonicalTile = CompositeRuntimeTile(canonical, backgroundColor);
+        using var runtimeTile = CompositeRuntimeTile(runtime, backgroundColor);
+        var metrics = CompareBitmaps(canonicalTile, runtimeTile);
+        return alphaMismatch ? metrics with { Resolved = false } : metrics;
+    }
+
+    private static SvgVisualMetrics CompareBitmaps(SKBitmap sourceBitmap, SKBitmap normalizedBitmap)
+    {
         long totalDifference = 0;
         var materiallyDifferent = 0;
         for (var y = 0; y < TileSize; y++)
@@ -58,6 +82,7 @@ internal static class SvgVisualVerifier
         if (rasterSize < ContentSize || rasterSize % ContentSize != 0)
             throw new ArgumentOutOfRangeException(nameof(rasterSize));
         var background = ParseColor(backgroundColor);
+        var backgroundRgb = ((uint)background.Red << 16) | ((uint)background.Green << 8) | background.Blue;
         using var bitmap = RenderContent(source, rasterSize, SKColors.Transparent);
         var runs = new List<RasterRun>();
         var coordinateScale = ContentSize / (double)rasterSize;
@@ -70,6 +95,11 @@ internal static class SvgVisualVerifier
                 var pixel = bitmap.GetPixel(x, y);
                 if (pixel.Alpha == 0) { x++; continue; }
                 var color = Composite(pixel, background);
+                // A subpixel can round exactly to the tile color after alpha
+                // compositing. Keeping it as an opaque path would preserve no
+                // visible artwork and would create a foreground/background
+                // paint collision in the canonical fallback.
+                if (color == backgroundRgb) { x++; continue; }
                 var start = x++;
                 while (x < rasterSize && Composite(bitmap.GetPixel(x, y), background) == color
                        && bitmap.GetPixel(x, y).Alpha > 0) x++;
@@ -109,6 +139,36 @@ internal static class SvgVisualVerifier
         Draw(svg, canvas, new SKRect(0, 0, size, size));
         canvas.Flush();
         return bitmap;
+    }
+
+    private static SKBitmap CompositeRuntimeTile(SKBitmap foreground, string backgroundColor)
+    {
+        var tile = new SKBitmap(TileSize, TileSize, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        using var canvas = new SKCanvas(tile);
+        canvas.Clear(ParseColor(backgroundColor));
+        canvas.DrawBitmap(foreground,
+            new SKRect(0, 0, foreground.Width, foreground.Height),
+            new SKRect(8, 8, 8 + ContentSize, 8 + ContentSize),
+            new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
+        canvas.Flush();
+        return tile;
+    }
+
+    private static bool HasVisiblePixel(SKBitmap bitmap)
+    {
+        foreach (var pixel in bitmap.Pixels)
+            if (pixel.Alpha != 0) return true;
+        return false;
+    }
+
+    private static bool AlphaPixelsMatch(SKBitmap left, SKBitmap right)
+    {
+        if (left.Width != right.Width || left.Height != right.Height) return false;
+        for (var y = 0; y < left.Height; y++)
+            for (var x = 0; x < left.Width; x++)
+                if (left.GetPixel(x, y).Alpha != right.GetPixel(x, y).Alpha)
+                    return false;
+        return true;
     }
 
     private static void Draw(byte[] data, SKCanvas canvas, SKRect target)

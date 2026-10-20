@@ -478,6 +478,15 @@ The background color must be evaluated with the normalized foreground. It is
 the final icon tile surface, not simply the first color encountered.
 Explicit multicolor foreground layers must retain their selected-source colors,
 and the chosen background must not hide required foreground layers.
+The builder must contrast-check the final background against every retained
+solid foreground paint. Reject exact or effectively indistinguishable
+foreground/background combinations below the format's 1.1:1 visibility
+separation boundary; this is a covered-paint guard, not an instruction to
+rewrite intentional source artwork to an accessibility contrast target.
+Otherwise choose deterministically from the documented neutral backgrounds,
+preferring white, then black, balanced gray `#767676`, and slate `#334155`; if
+none satisfies every paint, choose the neutral with the greatest minimum
+contrast. Record whether a light or dark contrast background was generated.
 
 Do not take an arbitrary color from another merged provider record when a different provider's icon was selected.
 
@@ -569,7 +578,9 @@ Compatible importers should only need to understand the `.otphicons` format.
 
 It should not need provider-specific Aegis/Simple Icons/Dashboard Icons parsing once the unified pack exists.
 
-Keep `formatVersion: 1` unless an existing implemented schema already requires another version.
+Keep strict format version 1 for compatibility, and use separately selected
+format version 2 when deterministic display-ready runtime rasters are included.
+Never add runtime assets or v2 manifest members to a format-1 archive.
 
 # Default output location
 
@@ -823,9 +834,12 @@ Continue enforcing protections against:
 
 Do not execute content from upstream archives.
 
-Do not render SVGs.
-
-SVGs are data.
+Untrusted SVGs may only be rendered after static safety validation, through
+the bounded in-process normalization/verification pipeline, with external
+resource loading and executable content disabled. Do not use shell commands,
+external renderers, remote resources, scripts, or SVG animation. Canonical
+SVGs remain preserved as data; format version 2 additionally carries the
+deterministic display-ready raster produced by the builder.
 
 Network downloads should use appropriate:
 

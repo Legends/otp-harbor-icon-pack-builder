@@ -18,7 +18,10 @@ public sealed class SourceAcquirer : ISourceAcquirer, IDisposable
 {
     // The cache format is part of the directory name so an open diagnostics report from an older
     // format cannot prevent a newer builder from publishing its immutable cache generation.
-    private const int ManifestVersion = 6;
+    // Version 7 revalidates acquired SVGs with the current executable-content and external-resource
+    // rules. Older Dashboard Icons caches may contain files that the current admission pipeline
+    // intentionally excludes, so they must not be reused.
+    private const int ManifestVersion = 7;
     private readonly IReadOnlyDictionary<string, IUpstreamDefinition> _definitions;
     private readonly IRemoteContentClient _client;
     private readonly bool _ownsClient;

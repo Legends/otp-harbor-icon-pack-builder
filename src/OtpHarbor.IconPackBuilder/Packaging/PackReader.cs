@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 using OtpHarbor.IconPackBuilder.Normalization;
 using OtpHarbor.IconPackBuilder.Providers;
 
@@ -14,8 +15,11 @@ public static class PackReader
         using var archive = SecureZipArchive.Open(path, new ArchiveLimits(
             MaxEntries: 100_000,
             MaxEntryBytes: maximumPackJsonBytes,
-            MaxUncompressedBytes: 512L * 1024 * 1024));
+            MaxUncompressedBytes: 512L * 1024 * 1024,
+            RequireCanonicalPaths: true));
         var packPath = archive.FindRequired("pack.json");
+        if (!string.Equals(packPath, "pack.json", StringComparison.Ordinal))
+            throw new InputValidationException("The pack manifest must be the canonical root path 'pack.json'.");
         PackDocument document;
         try
         {
@@ -32,7 +36,8 @@ public static class PackReader
 
     public static void Validate(PackDocument document, IReadOnlyDictionary<string, byte[]> files)
     {
-        if (document.FormatVersion != 1) throw new InputValidationException($"Unsupported pack formatVersion {document.FormatVersion}.");
+        if (document.FormatVersion is not (1 or 2))
+            throw new InputValidationException($"Unsupported pack formatVersion {document.FormatVersion}.");
         if (string.IsNullOrWhiteSpace(document.PackId) || CanonicalId.FromName(document.PackId) != document.PackId
             || !ProviderHelpers.IsSafeDisplayText(document.Name))
             throw new InputValidationException("pack.json requires packId and name.");
@@ -72,8 +77,13 @@ public static class PackReader
 
         var brandIds = new HashSet<string>(StringComparer.Ordinal);
         var expectedAliases = new Dictionary<string, string>(StringComparer.Ordinal);
+        string? previousBrandId = null;
         foreach (var brand in document.Brands)
         {
+            if (document.FormatVersion == 2 && previousBrandId is not null
+                && string.CompareOrdinal(previousBrandId, brand.Id) >= 0)
+                throw new InputValidationException("Version 2 brands are not in canonical ID order.");
+            previousBrandId = brand.Id;
             if (!brandIds.Add(brand.Id)) throw new InputValidationException($"Duplicate brand ID '{brand.Id}'.");
             if (CanonicalId.FromName(brand.Id) != brand.Id) throw new InputValidationException($"Invalid canonical brand ID '{brand.Id}'.");
             if (!ProviderHelpers.IsSafeDisplayText(brand.DisplayName)
@@ -87,6 +97,7 @@ public static class PackReader
                 throw new InputValidationException($"Brand '{brand.Id}' references missing icon or invalid icon path '{brand.Icon}'.");
             ProviderHelpers.ValidateSvg(svg, "otp-harbor-icons", brand.Icon, 1024 * 1024);
             SvgNormalizer.ValidateCanonical(svg, brand.Icon);
+            ValidateRuntimeIcon(document.FormatVersion, brand, files, expectedFiles, svg);
             if (brand.IssuerAliases is null || brand.IssuerAliases.Count == 0)
                 throw new InputValidationException($"Brand '{brand.Id}' has no issuer aliases.");
             if (brand.Sources is null || brand.Sources.Count == 0 || brand.SelectedSource is null)
@@ -131,6 +142,49 @@ public static class PackReader
         foreach (var file in files.Keys)
             if (!expectedFiles.Contains(file))
                 throw new InputValidationException($"Pack contains unexpected or unreferenced file '{file}'.");
+    }
+
+    private static void ValidateRuntimeIcon(
+        int formatVersion,
+        PackBrand brand,
+        IReadOnlyDictionary<string, byte[]> files,
+        ISet<string> expectedFiles,
+        byte[] canonicalSvg)
+    {
+        if (formatVersion == 1)
+        {
+            if (brand.RuntimeIcon is not null)
+                throw new InputValidationException($"Version 1 brand '{brand.Id}' must not contain runtimeIcon metadata.");
+            return;
+        }
+
+        var runtime = brand.RuntimeIcon
+            ?? throw new InputValidationException($"Version 2 brand '{brand.Id}' has no runtime icon.");
+        var expectedPath = $"runtime/foreground-128/{brand.Id}.png";
+        if (string.IsNullOrEmpty(runtime.Path)
+            || string.IsNullOrEmpty(runtime.MediaType)
+            || string.IsNullOrEmpty(runtime.Sha256)
+            || string.IsNullOrEmpty(runtime.RenderProfile)
+            || !string.Equals(runtime.Path, expectedPath, StringComparison.Ordinal)
+            || !string.Equals(runtime.MediaType, RuntimeIconRenderer.MediaType, StringComparison.Ordinal)
+            || runtime.Width != RuntimeIconRenderer.Width
+            || runtime.Height != RuntimeIconRenderer.Height
+            || !string.Equals(runtime.RenderProfile, RuntimeIconRenderer.RenderProfile, StringComparison.Ordinal)
+            || runtime.Sha256.Length != 64
+            || runtime.Sha256.Any(value => value is not (>= '0' and <= '9' or >= 'a' and <= 'f'))
+            || !expectedFiles.Add(expectedPath)
+            || !files.TryGetValue(expectedPath, out var png))
+            throw new InputValidationException($"Version 2 brand '{brand.Id}' has invalid or missing runtime icon metadata.");
+
+        var actualHash = SHA256.HashData(png);
+        var declaredHash = Convert.FromHexString(runtime.Sha256);
+        if (!CryptographicOperations.FixedTimeEquals(actualHash, declaredHash))
+            throw new InputValidationException($"Runtime PNG '{expectedPath}' does not match its SHA-256.");
+
+        using var decoded = DeterministicPng.DecodeAndValidate(png, runtime.Width, runtime.Height, expectedPath);
+        var metrics = SvgVisualVerifier.CompareCanonicalToRuntimePng(canonicalSvg, png, brand.BackgroundColor);
+        if (!metrics.Resolved)
+            throw new InputValidationException($"Runtime PNG '{expectedPath}' does not faithfully match the canonical SVG.");
     }
 
     private static void ValidateSourceReference(

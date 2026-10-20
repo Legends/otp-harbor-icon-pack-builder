@@ -158,6 +158,39 @@ public sealed class MergeTests
     }
 
     [Fact]
+    public void VersionTwoRepairsPreferredForegroundBackgroundCollisionBeforeRendering()
+    {
+        var mapping = new CanonicalBrandMapping("example", "Example", ["Example"],
+            [new("aegis", "Example"), new("dashboard-icons", "example")]);
+        var covered = RecordWithSvg("aegis", "Example", "Example", """
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+              <path d="M4 4h16v16H4z" fill="#AA0000"/>
+            </svg>
+            """) with
+        {
+            Metadata = new SortedDictionary<string, string?>(StringComparer.Ordinal)
+            {
+                ["nativeBrandColor"] = "#AA0000"
+            }
+        };
+        var alternate = RecordWithSvg("dashboard-icons", "example", "Example", """
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+              <path d="M4 4h16v16H4z" fill="#0066CC"/>
+            </svg>
+            """);
+
+        var result = new BrandMerger().Merge([
+            TestData.Catalog("aegis", covered),
+            TestData.Catalog("dashboard-icons", alternate)
+        ], TestData.Mappings(mapping), formatVersion: 2);
+
+        var brand = Assert.Single(result.Document.Brands);
+        Assert.Equal("aegis", brand.SelectedSource.Provider);
+        Assert.Equal("#FFFFFF", brand.BackgroundColor);
+        Assert.NotNull(brand.RuntimeIcon);
+    }
+
+    [Fact]
     public void FullColorCandidateBeatsPreferredMonochromeBadge()
     {
         var mapping = new CanonicalBrandMapping("microsoft", "Microsoft", ["Microsoft"],

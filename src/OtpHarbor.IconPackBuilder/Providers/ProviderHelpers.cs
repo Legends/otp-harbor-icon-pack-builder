@@ -42,10 +42,24 @@ internal static partial class ProviderHelpers
             var localReferences = new HashSet<string>(StringComparer.Ordinal);
             do
             {
+                if (reader.NodeType is XmlNodeType.Text or XmlNodeType.CDATA
+                    && ContainsExternalCssUrl(reader.Value))
+                    throw new XmlException("External SVG CSS resources are not supported.");
                 if (reader.NodeType != XmlNodeType.Element) continue;
                 if (reader.LocalName.Equals("script", StringComparison.OrdinalIgnoreCase)
                     || reader.LocalName.Equals("foreignObject", StringComparison.OrdinalIgnoreCase))
                     throw new XmlException("Executable SVG content is not supported.");
+                if (reader.HasAttributes)
+                    for (var index = 0; index < reader.AttributeCount; index++)
+                    {
+                        reader.MoveToAttribute(index);
+                        if (reader.LocalName.StartsWith("on", StringComparison.OrdinalIgnoreCase)
+                            && !reader.LocalName.Equals("only_selected", StringComparison.OrdinalIgnoreCase))
+                            throw new XmlException("SVG event-handler attributes are not supported.");
+                        if (ContainsExternalCssUrl(reader.Value))
+                            throw new XmlException("External SVG CSS resources are not supported.");
+                    }
+                reader.MoveToElement();
                 var id = reader.GetAttribute("id");
                 if (id is { Length: > 0 } && !ids.Add(id))
                     throw new XmlException("SVG contains duplicate identifiers.");
@@ -53,6 +67,12 @@ internal static partial class ProviderHelpers
                 ValidateSvgReference(
                     reader.GetAttribute("href", "http://www.w3.org/1999/xlink"),
                     localReferences);
+                if (reader.LocalName.Equals("image", StringComparison.OrdinalIgnoreCase)
+                    || reader.LocalName.Equals("animate", StringComparison.OrdinalIgnoreCase)
+                    || reader.LocalName.Equals("animateMotion", StringComparison.OrdinalIgnoreCase)
+                    || reader.LocalName.Equals("animateTransform", StringComparison.OrdinalIgnoreCase)
+                    || reader.LocalName.Equals("set", StringComparison.OrdinalIgnoreCase))
+                    throw new XmlException("Executable or embedded SVG content is not supported.");
                 if (reader.LocalName.Equals("path", StringComparison.OrdinalIgnoreCase)
                     && !string.IsNullOrWhiteSpace(reader.GetAttribute("d")))
                     foundGeometry = true;
@@ -161,6 +181,20 @@ internal static partial class ProviderHelpers
         if (!SafeLocalSvgReferenceRegex().IsMatch(value))
             throw new XmlException("externally referenced SVG content is not supported.");
         localReferences.Add(value[1..]);
+    }
+
+    private static bool ContainsExternalCssUrl(string value)
+    {
+        var offset = 0;
+        while ((offset = value.IndexOf("url(", offset, StringComparison.OrdinalIgnoreCase)) >= 0)
+        {
+            var end = value.IndexOf(')', offset + 4);
+            if (end < 0) return true;
+            var target = value[(offset + 4)..end].Trim().Trim('\'', '"').Trim();
+            if (!target.StartsWith('#')) return true;
+            offset = end + 1;
+        }
+        return false;
     }
 
     [GeneratedRegex("^#[A-Za-z_][A-Za-z0-9_.:-]{0,127}$", RegexOptions.CultureInvariant)]

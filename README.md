@@ -141,6 +141,7 @@ Available options:
 --mappings <directory>
 --provider-preference <comma-separated provider IDs>
 --rights-policy <preserve|documented-only|require-documented>
+--format-version <1|2>
 --conflict-report <path.json>
 --aegis <local.zip>
 --simple-icons <local.zip>
@@ -148,6 +149,19 @@ Available options:
 ```
 
 `--offline` disables network access and requires every source to exist in the validated cache or be supplied as a local override. `--refresh` redownloads this builder release's pinned source set. `--non-interactive` never prompts, and it will not replace an existing output unless `--force` is also supplied.
+
+Format 1 remains the default because current OTP Harbor releases accept only
+that version. It contains canonical normalized SVGs and no runtime PNG files.
+Format 2 must be requested explicitly:
+
+```text
+OtpHarbor.IconPackBuilder build --format-version 2
+```
+
+The builder prints a compatibility notice for v2. Each v2 brand keeps its
+canonical SVG and adds a deterministic transparent 128 by 128 foreground PNG
+for off-UI-thread decode and bitmap caching by a future compatible consumer.
+See the [format v2 consumer handoff](docs/FORMAT-V2-CONSUMER-HANDOFF.md).
 
 ## How the catalog is created
 
@@ -161,7 +175,22 @@ and a documented license may still impose conditions.
 
 The three upstream catalogs are merged into one deterministic set of canonical brands. Matching uses issuer aliases, not account names. Exact and explicitly mapped identities are preferred; ambiguous aliases are excluded instead of being assigned to the wrong brand.
 
-Every selected SVG is converted to a restricted, safe representation and compared with its source at the target tile size. A pack is written only when the complete catalog passes this verification. The output contains exact upstream revisions, source hashes, selected-icon provenance, and the license, credit, disclaimer, README, or trademark documents recognized in the pinned source snapshots.
+For format 2, runtime PNG rendering is deferred until candidates have been
+normalized and ranked. Unselected candidates do not consume rendering work
+unless a higher-ranked candidate fails and the deterministic fallback must be
+tried.
+
+Every selected SVG is converted to a restricted, safe representation and
+compared with its source at the target tile size. Untrusted SVGs may be rendered
+only after static safety validation through the bounded in-process
+normalization/verification pipeline, with executable content and external
+resource loading disabled. When v2 is selected, that same pipeline produces a
+deterministic display-ready PNG, reopens it, verifies its exact profile and
+hash, and compares it with the canonical SVG. A pack is written only when the
+complete catalog passes these gates. The output contains exact upstream
+revisions, source hashes, selected-icon provenance, and the license, credit,
+disclaimer, README, or trademark documents recognized in the pinned source
+snapshots.
 
 The `.otphicons` container format is documented in [Icon pack format](docs/ICON-PACK-FORMAT.md).
 
@@ -217,6 +246,8 @@ not guarantee completeness or permission.
 
 The classification rules and primary legal sources are documented in the
 [rights-evidence policy](docs/RIGHTS-POLICY.md).
+The pinned provider review and unresolved legal questions are documented in
+[pinned-provider rights and provenance review](docs/PROVIDER-RIGHTS-REVIEW.md).
 
 Rights holders or their representatives can open a GitHub issue identifying
 the provider, source ID, evidence, and requested action. Maintainers should

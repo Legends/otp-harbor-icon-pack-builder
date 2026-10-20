@@ -36,7 +36,7 @@ public sealed record ProviderCatalog(
 
 public sealed class PackDocument
 {
-    public int FormatVersion { get; init; } = 1;
+    public int FormatVersion { get; init; }
     public required string PackId { get; init; }
     public required string Name { get; init; }
     public required IReadOnlyList<PackSource> Sources { get; init; }
@@ -61,7 +61,17 @@ public sealed record PackBrand(
     string Icon,
     IReadOnlyList<string> IssuerAliases,
     SelectedSource SelectedSource,
-    IReadOnlyList<SourceReference> Sources);
+    IReadOnlyList<SourceReference> Sources,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    RuntimeIcon? RuntimeIcon = null);
+
+public sealed record RuntimeIcon(
+    string Path,
+    string MediaType,
+    int Width,
+    int Height,
+    string Sha256,
+    string RenderProfile);
 
 public sealed record SelectedSource(
     string Provider,
@@ -81,7 +91,8 @@ public sealed record PackBuildResult(
     IReadOnlyDictionary<string, byte[]> Licenses,
     BuildSummary Summary,
     IReadOnlyList<VisualVerificationEntry> VisualVerification,
-    IReadOnlyList<RightsAssessmentEntry>? RightsAssessments = null);
+    IReadOnlyList<RightsAssessmentEntry>? RightsAssessments = null,
+    IReadOnlyDictionary<string, byte[]>? RuntimeIcons = null);
 
 public enum RightsStatus
 {

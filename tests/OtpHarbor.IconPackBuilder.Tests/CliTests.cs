@@ -24,6 +24,7 @@ public sealed class CliTests
         Assert.True(File.Exists(rightsReportPath));
         using (var report = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(visualReportPath)))
         {
+            Assert.Equal(1, report.RootElement.GetProperty("formatVersion").GetInt32());
             Assert.Equal(1, report.RootElement.GetProperty("totalBrands").GetInt32());
             Assert.Equal(0, report.RootElement.GetProperty("unresolvedFailures").GetInt32());
             var brand = report.RootElement.GetProperty("brands")[0];
@@ -45,6 +46,7 @@ public sealed class CliTests
         using var report = System.Text.Json.JsonDocument.Parse(
             await File.ReadAllTextAsync(Path.ChangeExtension(outputPath, ".rights-report.json")));
         Assert.True(report.RootElement.GetProperty("notLegalClearance").GetBoolean());
+        Assert.Equal(1, report.RootElement.GetProperty("formatVersion").GetInt32());
         Assert.Equal("preserve", report.RootElement.GetProperty("policy").GetString());
         Assert.True(report.RootElement.GetProperty("brands").GetArrayLength() > 0);
     }
@@ -65,6 +67,55 @@ public sealed class CliTests
         Assert.Equal(["aegis", "dashboard-icons", "simple-icons"], pack.Document.Sources.Select(x => x.Provider));
         Assert.Equal("github", Assert.Single(pack.Document.Brands).Id);
         Assert.Equal("simple-icons", Assert.Single(pack.Document.Brands).SelectedSource.Provider);
+    }
+
+    [Fact]
+    public async Task FormatVersionOneIsDefaultAndVersionTwoIsExplicitWithCompatibilityNotice()
+    {
+        using var fixture = new CliFixture();
+        var v1Path = fixture.FilePath("format-v1.otphicons");
+        var v2Path = fixture.FilePath("format-v2.otphicons");
+
+        var v1 = await RunAsync(["build", "--output", v1Path, "--non-interactive"], fixture);
+        var v2 = await RunAsync([
+            "build", "--format-version", "2", "--offline", "--output", v2Path, "--non-interactive"
+        ], fixture);
+
+        Assert.Equal(0, v1.ExitCode);
+        Assert.Equal(0, v2.ExitCode);
+        Assert.Equal(1, (await PackReader.ReadAndValidateAsync(v1Path)).Document.FormatVersion);
+        var v2Pack = await PackReader.ReadAndValidateAsync(v2Path);
+        Assert.Equal(2, v2Pack.Document.FormatVersion);
+        Assert.All(v2Pack.Document.Brands, brand => Assert.NotNull(brand.RuntimeIcon));
+        Assert.Contains("not supported by current OTP Harbor releases", v2.Stdout);
+        Assert.True(fixture.Acquirer.LastOptions!.Offline);
+        using var visualReport = System.Text.Json.JsonDocument.Parse(
+            await File.ReadAllTextAsync(Path.ChangeExtension(v2Path, ".visual-report.json")));
+        Assert.Equal(2, visualReport.RootElement.GetProperty("formatVersion").GetInt32());
+        Assert.Equal(0, visualReport.RootElement.GetProperty("unresolvedFailures").GetInt32());
+        Assert.Contains("rendered-runtime-foreground-v1",
+            visualReport.RootElement.GetProperty("brands")[0].GetProperty("operations")
+                .EnumerateArray().Select(value => value.GetString()));
+        using var rightsReport = System.Text.Json.JsonDocument.Parse(
+            await File.ReadAllTextAsync(Path.ChangeExtension(v2Path, ".rights-report.json")));
+        Assert.Equal(2, rightsReport.RootElement.GetProperty("formatVersion").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("3")]
+    [InlineData("latest")]
+    public async Task FormatVersionRejectsUnsupportedValues(string value)
+    {
+        using var fixture = new CliFixture();
+
+        var result = await RunAsync([
+            "build", "--format-version", value, "--output", fixture.FilePath("invalid.otphicons"), "--non-interactive"
+        ], fixture);
+
+        Assert.Equal(3, result.ExitCode);
+        Assert.Contains("must be 1 or 2", result.Stderr);
+        Assert.Equal(0, fixture.Acquirer.CallCount);
     }
 
     [Fact]

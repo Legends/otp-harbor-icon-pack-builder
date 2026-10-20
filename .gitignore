@@ -28,6 +28,7 @@ tmp/
 *.zip
 *.conflicts.json
 *.visual-report.json
+*.rights-report.json
 
 # Extracted third-party source trees and local fixtures
 third-party/

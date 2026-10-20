@@ -16,9 +16,13 @@ public sealed class BrandMerger
         string packId = "otp-harbor-icons",
         string packName = "OTP Harbor Icons",
         Action<CatalogBuildProgress>? progress = null,
-        RightsPolicy rightsPolicy = RightsPolicy.Preserve)
+        RightsPolicy rightsPolicy = RightsPolicy.Preserve,
+        int formatVersion = 1,
+        CancellationToken cancellationToken = default)
     {
         if (catalogs.Count == 0) throw new InputValidationException("At least one provider input is required.");
+        if (formatVersion is not (1 or 2))
+            throw new InputValidationException($"Unsupported output format version {formatVersion}.");
         providerPreference ??= DefaultProviderPreference;
         var sourceMappings = mappings.CanonicalBrands.SelectMany(brand => brand.Matches.Select(match => (brand, match)))
             .ToDictionary(x => Key(x.match.Provider, x.match.SourceId), x => x.brand, StringComparer.OrdinalIgnoreCase);
@@ -87,6 +91,7 @@ public sealed class BrandMerger
 
         var pendingBrands = new List<PendingBrand>();
         var icons = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
+        var runtimeIcons = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
         var aliasCandidates = new Dictionary<string, List<AliasCandidate>>(StringComparer.Ordinal);
         var selectedCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
         var rightsCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
@@ -96,13 +101,24 @@ public sealed class BrandMerger
 
         foreach (var group in groups.Values)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             progress?.Invoke(new CatalogBuildProgress(completedBrands, groups.Count, group.Id));
-            var selected = SelectSource(group, effectiveSourceOverrides, providerPreference);
+            var selected = SelectSource(group, effectiveSourceOverrides, providerPreference,
+                formatVersion, cancellationToken);
             var selectedRights = RightsAssessor.Assess(selected.Record, mappings.EffectiveRightsOverrides);
             if (rightsPolicy == RightsPolicy.RequireDocumented && !RightsAssessor.IsDocumented(selectedRights))
                 throw new InputValidationException($"Brand '{group.Id}' selected '{selected.Record.Provider}/{selected.Record.SourceId}' with rights status '{RightsAssessor.ToMetadataValue(selectedRights.Status)}'. Add reviewed evidence in rights-assessments.json, choose another source, or use --rights-policy preserve.");
             var iconPath = $"icons/{group.Id}.svg";
             icons.Add(iconPath, selected.Normalized.Svg);
+            RuntimeIcon? runtimeIcon = null;
+            if (selected.Runtime is not null)
+            {
+                var runtimePath = $"runtime/foreground-128/{group.Id}.png";
+                runtimeIcons.Add(runtimePath, selected.Runtime.Png);
+                runtimeIcon = new RuntimeIcon(runtimePath, RuntimeIconRenderer.MediaType,
+                    RuntimeIconRenderer.Width, RuntimeIconRenderer.Height,
+                    selected.Runtime.Sha256, RuntimeIconRenderer.RenderProfile);
+            }
             selectedCounts[selected.Record.Provider] = selectedCounts.GetValueOrDefault(selected.Record.Provider) + 1;
             var rightsStatus = RightsAssessor.ToMetadataValue(selectedRights.Status);
             rightsCounts[rightsStatus] = rightsCounts.GetValueOrDefault(rightsStatus) + 1;
@@ -130,15 +146,19 @@ public sealed class BrandMerger
                 : string.Join(',', selected.Normalized.Operations);
             selectedMetadata["normalizedForegroundColorCount"] = selected.Normalized.ForegroundColors.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
             pendingBrands.Add(new PendingBrand(group.Id, group.DisplayName, selected.Normalized.BackgroundColor, iconPath,
-                new SelectedSource(selected.Record.Provider, selected.Record.SourceId, SortedMetadata(selectedMetadata)), sourceReferences));
-            var metrics = selected.Normalized.VisualMetrics;
+                new SelectedSource(selected.Record.Provider, selected.Record.SourceId, SortedMetadata(selectedMetadata)),
+                sourceReferences, runtimeIcon));
+            var metrics = selected.Runtime?.VisualMetrics ?? selected.Normalized.VisualMetrics;
+            var operations = selected.Runtime is null
+                ? selected.Normalized.Operations
+                : selected.Normalized.Operations.Append("rendered-runtime-foreground-v1").ToArray();
             visualVerification.Add(new VisualVerificationEntry(
                 group.Id,
                 selected.Record.Provider,
                 selected.Record.SourceId,
                 selected.Record.AssetPath,
                 selected.Normalized.BackgroundColor,
-                selected.Normalized.Operations,
+                operations,
                 metrics.MeanAbsoluteChannelDifference,
                 metrics.MateriallyDifferentPixels,
                 metrics.TotalPixels,
@@ -158,7 +178,8 @@ public sealed class BrandMerger
                 brand.Icon,
                 aliasResolution.AliasesByBrand[brand.Id],
                 brand.SelectedSource,
-                brand.Sources))
+                brand.Sources,
+                brand.RuntimeIcon))
             .OrderBy(x => x.Id, StringComparer.Ordinal)
             .ToArray();
         var issuerAliases = aliasResolution.Index;
@@ -184,6 +205,7 @@ public sealed class BrandMerger
 
         var document = new PackDocument
         {
+            FormatVersion = formatVersion,
             PackId = packId,
             Name = packName,
             Sources = packSources,
@@ -202,7 +224,8 @@ public sealed class BrandMerger
         };
         return new PackBuildResult(document, icons, licenses, summary,
             visualVerification.OrderBy(x => x.BrandId, StringComparer.Ordinal).ToArray(),
-            rightsAssessments.OrderBy(x => x.BrandId, StringComparer.Ordinal).ToArray());
+            rightsAssessments.OrderBy(x => x.BrandId, StringComparer.Ordinal).ToArray(),
+            runtimeIcons);
     }
 
     private static List<BuildConflict> FindDuplicateSources(IReadOnlyList<SourceRecord> records)
@@ -224,43 +247,81 @@ public sealed class BrandMerger
         return result;
     }
 
-    private static NormalizedSelection SelectSource(BrandGroup group, IReadOnlyDictionary<string, SourceOverride> overrides, IReadOnlyList<string> preference)
+    private static NormalizedSelection SelectSource(
+        BrandGroup group,
+        IReadOnlyDictionary<string, SourceOverride> overrides,
+        IReadOnlyList<string> preference,
+        int formatVersion,
+        CancellationToken cancellationToken)
     {
         if (overrides.TryGetValue(group.Id, out var sourceOverride))
         {
             var overridden = group.Records.SingleOrDefault(x => x.Provider.Equals(sourceOverride.Provider, StringComparison.OrdinalIgnoreCase)
                 && x.SourceId.Equals(sourceOverride.SourceId, StringComparison.OrdinalIgnoreCase))
                 ?? throw new InputValidationException($"Source override for '{group.Id}' refers to missing record '{sourceOverride.Provider}/{sourceOverride.SourceId}'.");
-            return Normalize(overridden, ResolveBackgroundColor(group, overridden), group.Id);
+            var normalizedOverride = Normalize(overridden, ResolveBackgroundColor(group, overridden), group.Id);
+            return formatVersion == 2
+                ? RenderRuntime(normalizedOverride, group.Id, cancellationToken)
+                : normalizedOverride;
         }
 
         var failures = new List<string>();
         var normalized = new List<NormalizedSelection>();
         foreach (var record in group.Records)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try { normalized.Add(Normalize(record, ResolveBackgroundColor(group, record), group.Id)); }
             catch (InputValidationException ex) { failures.Add($"{record.Provider}/{record.SourceId}: {ex.Message}"); }
         }
         if (normalized.Count == 0)
             throw new InputValidationException($"Brand '{group.Id}' has no source that can be normalized: {string.Join("; ", failures)}");
-        return normalized.OrderBy(VisualQualityRank)
+        var ranked = normalized.OrderBy(VisualQualityRank)
             .ThenBy(x => PreferenceRank(x.Record.Provider, preference))
             .ThenBy(x => QualityRank(x.Record.Quality)).ThenBy(x => x.Record.Provider, StringComparer.Ordinal)
-            .ThenBy(x => x.Record.SourceId, StringComparer.Ordinal).First();
+            .ThenBy(x => x.Record.SourceId, StringComparer.Ordinal).ToArray();
+        if (formatVersion == 1) return ranked[0];
+        foreach (var candidate in ranked)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try { return RenderRuntime(candidate, group.Id, cancellationToken); }
+            catch (InputValidationException ex) { failures.Add($"{candidate.Record.Provider}/{candidate.Record.SourceId}: {ex.Message}"); }
+        }
+        throw new InputValidationException($"Brand '{group.Id}' has no source with a valid runtime rendering: {string.Join("; ", failures)}");
     }
 
-    private static NormalizedSelection Normalize(SourceRecord record, string backgroundColor, string brandId)
+    private static NormalizedSelection Normalize(
+        SourceRecord record,
+        string backgroundColor,
+        string brandId)
     {
         try
         {
             var materializeImplicitBlackFill = record.Provider.Equals("simple-icons", StringComparison.OrdinalIgnoreCase)
                 && backgroundColor.Equals("#FFFFFF", StringComparison.Ordinal);
-            return new NormalizedSelection(record,
-                SvgNormalizer.Normalize(record.Svg, backgroundColor, materializeImplicitBlackFill));
+            var normalized = SvgNormalizer.Normalize(record.Svg, backgroundColor, materializeImplicitBlackFill);
+            return new NormalizedSelection(record, normalized, null);
         }
         catch (InputValidationException ex)
         {
             throw new InputValidationException($"{record.Provider}/{record.SourceId} for '{brandId}' could not be normalized: {ex.Message}");
+        }
+    }
+
+    private static NormalizedSelection RenderRuntime(
+        NormalizedSelection selection,
+        string brandId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var runtime = RuntimeIconRenderer.Render(selection.Normalized.Svg, selection.Normalized.BackgroundColor,
+                $"{selection.Record.Provider}/{selection.Record.SourceId} for '{brandId}'", cancellationToken);
+            return selection with { Runtime = runtime };
+        }
+        catch (InputValidationException ex)
+        {
+            throw new InputValidationException(
+                $"{selection.Record.Provider}/{selection.Record.SourceId} for '{brandId}' could not be rendered: {ex.Message}");
         }
     }
 
@@ -269,9 +330,10 @@ public sealed class BrandMerger
         var operations = selection.Normalized.Operations;
         var usesRasterFallback = operations.Any(operation =>
             operation.StartsWith("raster-flattened-at-", StringComparison.Ordinal));
-        var usesGeneratedLightNeutral = operations.Contains("selected-light-contrast-background", StringComparer.Ordinal);
+        var usesGeneratedNeutral = operations.Contains("selected-light-contrast-background", StringComparer.Ordinal)
+            || operations.Contains("selected-dark-contrast-background", StringComparer.Ordinal);
         var hasSourceBackedBackground = operations.Contains("promoted-full-logo-background", StringComparer.Ordinal)
-            || (!usesGeneratedLightNeutral
+            || (!usesGeneratedNeutral
                 && !selection.Normalized.BackgroundColor.Equals("#334155", StringComparison.Ordinal));
         var colorCount = selection.Normalized.ForegroundColors.Count;
         var chromaticColorCount = selection.Normalized.ForegroundColors.Count(IsChromatic);
@@ -447,9 +509,13 @@ public sealed class BrandMerger
         string BackgroundColor,
         string Icon,
         SelectedSource SelectedSource,
-        IReadOnlyList<SourceReference> Sources);
+        IReadOnlyList<SourceReference> Sources,
+        RuntimeIcon? RuntimeIcon);
 
-    private sealed record NormalizedSelection(SourceRecord Record, SvgNormalizationResult Normalized);
+    private sealed record NormalizedSelection(
+        SourceRecord Record,
+        SvgNormalizationResult Normalized,
+        RuntimeIconRenderResult? Runtime);
 
     private sealed record AliasResolution(
         IReadOnlyList<IssuerAliasEntry> Index,

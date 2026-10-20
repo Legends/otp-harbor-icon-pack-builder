@@ -7,9 +7,12 @@ public static class VisualVerificationReportWriter
 {
     public static async Task WriteAsync(
         string path,
+        int formatVersion,
         IReadOnlyList<VisualVerificationEntry> entries,
         CancellationToken cancellationToken = default)
     {
+        if (formatVersion is not (1 or 2))
+            throw new ArgumentOutOfRangeException(nameof(formatVersion));
         var ordered = entries.OrderBy(x => x.BrandId, StringComparer.Ordinal).ToArray();
         var unresolved = ordered.Count(x => !x.Resolved);
         if (unresolved != 0)
@@ -17,7 +20,7 @@ public static class VisualVerificationReportWriter
 
         var report = new
         {
-            formatVersion = 1,
+            formatVersion,
             totalBrands = ordered.Length,
             unresolvedFailures = unresolved,
             brands = ordered

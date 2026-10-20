@@ -44,6 +44,9 @@ public sealed class SecureZipArchive : IDisposable
             foreach (var entry in archive.Entries)
             {
                 var normalized = ValidatePath(entry.FullName, path);
+                if (limits.RequireCanonicalPaths
+                    && !string.Equals(entry.FullName, normalized, StringComparison.Ordinal))
+                    throw new InputValidationException($"Archive '{path}' contains non-canonical path '{entry.FullName}'.");
                 if (normalized.EndsWith("/", StringComparison.Ordinal))
                     continue;
                 if (!entries.TryAdd(normalized, entry))

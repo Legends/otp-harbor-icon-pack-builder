@@ -6,4 +6,5 @@ public sealed record ArchiveLimits(
     long MaxUncompressedBytes = 2L * 1024 * 1024 * 1024,
     long MaxEntryBytes = 10L * 1024 * 1024,
     long MaxSvgBytes = 1024L * 1024,
-    double MaxCompressionRatio = 100.0);
+    double MaxCompressionRatio = 100.0,
+    bool RequireCanonicalPaths = false);

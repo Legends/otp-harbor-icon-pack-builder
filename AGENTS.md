@@ -341,7 +341,12 @@ Protect against:
 
 Do not execute scripts or binaries contained in source packs.
 
-SVGs are data. Do not render them in the builder.
+Untrusted SVGs may only be rendered after static safety validation, through
+the bounded in-process normalization/verification pipeline, with external
+resource loading and executable content disabled. Rendering must never invoke
+native shell commands or external programs. Canonical SVGs remain data in the
+pack; format v2 may additionally contain deterministic display-ready runtime
+rasters produced by that pipeline.
 
 Use configurable but conservative limits.
 

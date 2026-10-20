@@ -56,4 +56,19 @@ public sealed class SecurityTests
             new ArchiveLimits(MaxEntryBytes: 2_000_000, MaxUncompressedBytes: 2_000_000, MaxCompressionRatio: 10)));
         Assert.Contains("compression-ratio", exception.Message);
     }
+
+    [Fact]
+    public void StrictPackModeRejectsBackslashPaths()
+    {
+        using var archive = new TestArchive(new Dictionary<string, string>
+        {
+            ["icons\\github.svg"] = TestData.Svg
+        });
+
+        var exception = Assert.Throws<InputValidationException>(() => SecureZipArchive.Open(
+            archive.Path,
+            new ArchiveLimits(RequireCanonicalPaths: true)));
+
+        Assert.Contains("non-canonical path", exception.Message);
+    }
 }

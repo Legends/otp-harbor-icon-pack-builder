@@ -49,6 +49,12 @@ the builder does not label assets globally lawful.
 The assessment is attached to the selected-source metadata and written to the
 sibling rights report.
 
+In format 2, the runtime PNG is a deterministic rendering of that same selected
+source. It does not receive a separate or broader evidence status: it inherits
+the canonical SVG's provider/source identity, pinned revision, license and
+guideline metadata, notices, assessment, and limitations. Rasterization does
+not grant copyright or trademark rights.
+
 | Status | Meaning | Automated effect |
 |---|---|---|
 | unknown | No asset-level license evidence was found. | Preserved by the default policy; excluded by documented-only; rejected by require-documented if selected. |
@@ -99,3 +105,8 @@ preserve the report, assess exclusion promptly, record the result in the manual
 mapping, and publish a new version. Existing release assets should not be
 silently replaced because their hashes and source revision form part of the
 audit trail.
+
+The dated review of the currently pinned provider documents is in
+[PROVIDER-RIGHTS-REVIEW.md](PROVIDER-RIGHTS-REVIEW.md). It is evidence handling,
+not legal advice; unresolved jurisdiction-specific questions require qualified
+legal counsel.

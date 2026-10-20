@@ -111,6 +111,12 @@ public static class CliApplication
             ValidateAcquiredInputs(sourceInputs, providerLookup);
             PrintResolvedSources(output, sourceInputs);
 
+            if (options.FormatVersion == 2)
+                WriteStatusLine(output,
+                    "[!] Compatibility: format v2 is not supported by current OTP Harbor releases; install it only in a v2-capable consumer.",
+                    AnsiYellow,
+                    useColor);
+
             await output.WriteLineAsync("Building canonical catalog...");
             var catalogs = new List<ProviderCatalog>();
             foreach (var sourceInput in sourceInputs.OrderBy(x => x.Provider, StringComparer.Ordinal))
@@ -127,7 +133,8 @@ public static class CliApplication
             try
             {
                 result = new BrandMerger().Merge(catalogs, mappings, options.ProviderPreference,
-                    progress: progress.Report, rightsPolicy: options.RightsPolicy);
+                    progress: progress.Report, rightsPolicy: options.RightsPolicy,
+                    formatVersion: options.FormatVersion, cancellationToken: cancellationToken);
                 progress.Complete();
             }
             catch (BuildConflictException ex)
@@ -156,8 +163,9 @@ public static class CliApplication
                 await PackSerializer.WriteAsync(temporary, result, cancellationToken);
                 await output.WriteLineAsync("Validating completed pack...");
                 await PackReader.ReadAndValidateAsync(temporary, cancellationToken);
-                await VisualVerificationReportWriter.WriteAsync(temporaryVisualReport, result.VisualVerification, cancellationToken);
-                await RightsAssessmentReportWriter.WriteAsync(temporaryRightsReport, options.RightsPolicy,
+                await VisualVerificationReportWriter.WriteAsync(temporaryVisualReport, result.Document.FormatVersion,
+                    result.VisualVerification, cancellationToken);
+                await RightsAssessmentReportWriter.WriteAsync(temporaryRightsReport, result.Document.FormatVersion, options.RightsPolicy,
                     result.RightsAssessments ?? [], result.Summary.RightsExcludedRecords, cancellationToken);
 
                 // A successful pack must never be accompanied by a stale report from an older failed build.
@@ -235,6 +243,8 @@ public static class CliApplication
         var force = false;
         var rightsPolicy = RightsPolicy.Preserve;
         var rightsPolicySpecified = false;
+        var formatVersion = 1;
+        var formatVersionSpecified = false;
         var start = args.Length == 0 ? 0 : 1;
 
         for (var i = start; i < args.Length; i++)
@@ -242,7 +252,7 @@ public static class CliApplication
             var option = args[i];
             if (option is "--help" or "-h")
                 return new CliOptions(null, null, null, null, localOverrides, null, RightsPolicy.Preserve,
-                    false, false, false, false, true);
+                    1, false, false, false, false, true);
             switch (option.ToLowerInvariant())
             {
                 case "--offline": offline = true; continue;
@@ -278,13 +288,19 @@ public static class CliApplication
                     rightsPolicy = ParseRightsPolicy(value);
                     rightsPolicySpecified = true;
                     break;
+                case "format-version":
+                    if (formatVersionSpecified) throw new InputValidationException("--format-version may be specified only once.");
+                    if (!int.TryParse(value, out formatVersion) || formatVersion is not (1 or 2))
+                        throw new InputValidationException("--format-version must be 1 or 2.");
+                    formatVersionSpecified = true;
+                    break;
                 default: throw new InputValidationException($"Unknown option '{option}'.");
             }
         }
 
         if (offline && refresh) throw new InputValidationException("--offline and --refresh cannot be used together.");
         return new CliOptions(outputPath, conflictPath, mappingsPath, cachePath, localOverrides, preference, rightsPolicy,
-            offline, refresh, nonInteractive, force, false);
+            formatVersion, offline, refresh, nonInteractive, force, false);
     }
 
     private static RightsPolicy ParseRightsPolicy(string value) => value.ToLowerInvariant() switch
@@ -510,6 +526,7 @@ public static class CliApplication
         writer.WriteLine("  --mappings <directory>       Override mapping files");
         writer.WriteLine("  --provider-preference <ids>  Comma-separated provider IDs");
         writer.WriteLine("  --rights-policy <policy>     preserve (default), documented-only, or require-documented");
+        writer.WriteLine("  --format-version <1|2>       Pack format; 1 is the compatibility default");
         writer.WriteLine("  --conflict-report <json>     Override conflict-report path");
     }
 
@@ -521,6 +538,7 @@ public static class CliApplication
         IReadOnlyDictionary<string, string> LocalOverrides,
         IReadOnlyList<string>? ProviderPreference,
         RightsPolicy RightsPolicy,
+        int FormatVersion,
         bool Offline,
         bool Refresh,
         bool NonInteractive,

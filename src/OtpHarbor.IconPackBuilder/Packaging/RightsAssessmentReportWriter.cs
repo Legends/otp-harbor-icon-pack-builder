@@ -6,18 +6,21 @@ public static class RightsAssessmentReportWriter
 {
     public static async Task WriteAsync(
         string path,
+        int formatVersion,
         RightsPolicy policy,
         IReadOnlyList<RightsAssessmentEntry> assessments,
         int excludedRecords,
         CancellationToken cancellationToken = default)
     {
+        if (formatVersion is not (1 or 2))
+            throw new ArgumentOutOfRangeException(nameof(formatVersion));
         var ordered = assessments.OrderBy(x => x.BrandId, StringComparer.Ordinal).ToArray();
         var counts = ordered.GroupBy(x => RightsStatusValue(x.Status), StringComparer.Ordinal)
             .OrderBy(x => x.Key, StringComparer.Ordinal)
             .ToDictionary(x => x.Key, x => x.Count(), StringComparer.Ordinal);
         var report = new
         {
-            formatVersion = 1,
+            formatVersion,
             policy = PolicyValue(policy),
             notLegalClearance = true,
             explanation = "Statuses record available evidence. They do not determine copyright permission, trademark compliance, endorsement, or suitability for a particular jurisdiction or use.",

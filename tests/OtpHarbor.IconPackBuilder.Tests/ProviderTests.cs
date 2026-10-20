@@ -174,6 +174,62 @@ public sealed class ProviderTests
     }
 
     [Fact]
+    public async Task SvgWithInkscapeOnlySelectedMetadataIsAcceptedButEventHandlersAreRejected()
+    {
+        using var safeArchive = new TestArchive(new Dictionary<string, string>
+        {
+            ["data/simple-icons.json"] = "[{\"title\":\"Safe Metadata\",\"hex\":\"123456\",\"source\":\"https://example.test\"}]",
+            ["icons/safemetadata.svg"] = "<svg xmlns=\"http://www.w3.org/2000/svg\" only_selected=\"false\"><path d=\"M0 0h1v1z\"/></svg>"
+        });
+
+        var catalog = await new SimpleIconsProvider().LoadAsync(new("simple-icons", safeArchive.Path));
+        Assert.Equal("safemetadata", Assert.Single(catalog.Records).SourceId);
+
+        using var unsafeArchive = new TestArchive(new Dictionary<string, string>
+        {
+            ["data/simple-icons.json"] = "[{\"title\":\"Event Handler\",\"hex\":\"123456\",\"source\":\"https://example.test\"}]",
+            ["icons/eventhandler.svg"] = "<svg xmlns=\"http://www.w3.org/2000/svg\" onload=\"alert(1)\"><path d=\"M0 0h1v1z\"/></svg>"
+        });
+
+        var exception = await Assert.ThrowsAsync<InputValidationException>(() =>
+            new SimpleIconsProvider().LoadAsync(new("simple-icons", unsafeArchive.Path)));
+        Assert.Contains("event-handler attributes", exception.Message);
+    }
+
+    [Fact]
+    public async Task SvgCssAllowsLocalFragmentUrlsButRejectsExternalResources()
+    {
+        using var safeArchive = new TestArchive(new Dictionary<string, string>
+        {
+            ["data/simple-icons.json"] = "[{\"title\":\"Local Gradient\",\"hex\":\"123456\",\"source\":\"https://example.test\"}]",
+            ["icons/localgradient.svg"] = """
+                <svg xmlns="http://www.w3.org/2000/svg">
+                  <defs><linearGradient id="gradient"><stop offset="0" stop-color="#fff"/></linearGradient></defs>
+                  <path style="fill:url('#gradient')" d="M0 0h1v1z"/>
+                </svg>
+                """
+        });
+
+        var catalog = await new SimpleIconsProvider().LoadAsync(new("simple-icons", safeArchive.Path));
+        Assert.Equal("localgradient", Assert.Single(catalog.Records).SourceId);
+
+        using var unsafeArchive = new TestArchive(new Dictionary<string, string>
+        {
+            ["data/simple-icons.json"] = "[{\"title\":\"Remote Font\",\"hex\":\"123456\",\"source\":\"https://example.test\"}]",
+            ["icons/remotefont.svg"] = """
+                <svg xmlns="http://www.w3.org/2000/svg">
+                  <style>@font-face { src: url(&quot;https://example.test/font.woff2&quot;); }</style>
+                  <path d="M0 0h1v1z"/>
+                </svg>
+                """
+        });
+
+        var exception = await Assert.ThrowsAsync<InputValidationException>(() =>
+            new SimpleIconsProvider().LoadAsync(new("simple-icons", unsafeArchive.Path)));
+        Assert.Contains("External SVG CSS resources", exception.Message);
+    }
+
+    [Fact]
     public async Task SvgWithResolvedLocalReferencesIsAcceptedLikeTheApplicationImporter()
     {
         using var archive = new TestArchive(new Dictionary<string, string>

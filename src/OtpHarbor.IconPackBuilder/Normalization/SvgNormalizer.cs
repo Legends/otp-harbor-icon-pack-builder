@@ -17,7 +17,12 @@ public sealed record SvgNormalizationResult(
 public static partial class SvgNormalizer
 {
     private const int MaximumSvgBytes = 1024 * 1024;
+    // This is a visibility-collision boundary, not an accessibility contrast target.
+    // It rejects equal or effectively indistinguishable tile/paint colors without
+    // rewriting intentional low-contrast source artwork.
+    private const double MinimumForegroundContrastRatio = 1.1;
     private static readonly XNamespace SvgNamespace = "http://www.w3.org/2000/svg";
+    private static readonly string[] NeutralBackgrounds = ["#FFFFFF", "#000000", "#767676", "#334155"];
 
     public static SvgNormalizationResult Normalize(
         byte[] input,
@@ -85,12 +90,14 @@ public static partial class SvgNormalizer
             .Distinct(StringComparer.Ordinal)
             .OrderBy(value => value, StringComparer.Ordinal)
             .ToArray();
+        var runtimeForegroundColors = RuntimeForegroundColors(paths);
         if (normalizedBackground.Equals("#334155", StringComparison.Ordinal)
             && ShouldUseLightNeutral(foregroundColors))
         {
             normalizedBackground = "#FFFFFF";
             operations.Add("selected-light-contrast-background");
         }
+        normalizedBackground = EnsureForegroundContrast(normalizedBackground, runtimeForegroundColors, operations);
 
         var outputRoot = new XElement(SvgNamespace + "svg",
             new XAttribute("viewBox", FormatViewBox(viewBox)),
@@ -173,8 +180,12 @@ public static partial class SvgNormalizer
         if (disallowed is not null)
             throw new InputValidationException($"Canonical SVG '{path}' contains unresolved <{disallowed.Name.LocalName}> content.");
         var paths = elements.Where(element => element.Name.LocalName == "path").ToArray();
-        if (paths.Length == 0 || paths.Any(element => string.IsNullOrWhiteSpace(Attribute(element, "d"))))
+        if (paths.Length == 0 || paths.Any(element => element.Parent != root || element.HasElements
+                || string.IsNullOrWhiteSpace(Attribute(element, "d"))))
             throw new InputValidationException($"Canonical SVG '{path}' has no path geometry.");
+        var rootAttributes = root.Attributes().Where(attribute => !attribute.IsNamespaceDeclaration).ToArray();
+        if (rootAttributes.Length != 1 || rootAttributes[0].Name.LocalName != "viewBox")
+            throw new InputValidationException($"Canonical SVG '{path}' contains unsupported root attributes.");
         foreach (var element in elements)
         {
             if (Attribute(element, "style") is not null || Attribute(element, "class") is not null
@@ -185,6 +196,20 @@ public static partial class SvgNormalizer
                     && !paint.Equals("none", StringComparison.OrdinalIgnoreCase)
                     && NormalizeColor(paint) is null)
                     throw new InputValidationException($"Canonical SVG '{path}' contains unsupported {paintName} paint '{paint}'.");
+            if (element == root) continue;
+            foreach (var attribute in element.Attributes().Where(attribute => !attribute.IsNamespaceDeclaration))
+                if (attribute.Name.LocalName is not ("d" or "fill" or "stroke" or "stroke-width" or "fill-rule"
+                    or "transform" or "data-otp-source-shape"))
+                    throw new InputValidationException($"Canonical SVG '{path}' contains unsupported attribute '{attribute.Name.LocalName}'.");
+            if (Attribute(element, "fill-rule") is { } fillRule && fillRule is not ("evenodd" or "nonzero"))
+                throw new InputValidationException($"Canonical SVG '{path}' contains unsupported fill-rule '{fillRule}'.");
+            if (Attribute(element, "transform") is { } transform
+                && (transform.Length > 1024 || !TransformListRegex().IsMatch(transform)))
+                throw new InputValidationException($"Canonical SVG '{path}' contains an invalid transform.");
+            if (Attribute(element, "stroke-width") is { } strokeWidth
+                && (!double.TryParse(strokeWidth, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedStrokeWidth)
+                    || !double.IsFinite(parsedStrokeWidth) || parsedStrokeWidth <= 0))
+                throw new InputValidationException($"Canonical SVG '{path}' contains an invalid stroke width.");
         }
     }
 
@@ -698,6 +723,58 @@ public static partial class SvgNormalizer
         // requiring a strict majority incorrectly surrounded these badges with
         // the slate last-resort fallback.
         return darkOrColored * 2 >= foregroundColors.Count;
+    }
+
+    private static string EnsureForegroundContrast(
+        string selectedBackground,
+        IReadOnlyList<string> foregroundColors,
+        ISet<string> operations)
+    {
+        if (foregroundColors.Count == 0 || MinimumContrast(selectedBackground, foregroundColors) >= MinimumForegroundContrastRatio)
+            return selectedBackground;
+
+        var qualifying = NeutralBackgrounds.FirstOrDefault(candidate =>
+            MinimumContrast(candidate, foregroundColors) >= MinimumForegroundContrastRatio);
+        var replacement = qualifying ?? NeutralBackgrounds
+            .OrderByDescending(candidate => MinimumContrast(candidate, foregroundColors))
+            .ThenBy(candidate => candidate, StringComparer.Ordinal)
+            .First();
+        if (replacement.Equals(selectedBackground, StringComparison.Ordinal)) return selectedBackground;
+        operations.Remove("selected-light-contrast-background");
+        operations.Add(replacement == "#FFFFFF"
+            ? "selected-light-contrast-background"
+            : "selected-dark-contrast-background");
+        return replacement;
+    }
+
+    private static string[] RuntimeForegroundColors(IEnumerable<XElement> paths)
+    {
+        var colors = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var path in paths)
+        {
+            var fill = (string?)path.Attribute("fill");
+            if (fill is null)
+                colors.Add("#FFFFFF");
+            else if (!fill.Equals("none", StringComparison.OrdinalIgnoreCase))
+                colors.Add(fill);
+            var stroke = (string?)path.Attribute("stroke");
+            if (stroke is { Length: > 0 } && !stroke.Equals("none", StringComparison.OrdinalIgnoreCase))
+                colors.Add(stroke);
+        }
+        return colors.ToArray();
+    }
+
+    private static double MinimumContrast(string background, IReadOnlyList<string> foregroundColors)
+    {
+        return foregroundColors.Min(color => Contrast(background, color));
+    }
+
+    private static double Contrast(string first, string second)
+    {
+        var firstLuminance = RelativeLuminance(ParseHex(first));
+        var secondLuminance = RelativeLuminance(ParseHex(second));
+        return (Math.Max(firstLuminance, secondLuminance) + 0.05)
+            / (Math.Min(firstLuminance, secondLuminance) + 0.05);
     }
 
     private static double RelativeLuminance((byte R, byte G, byte B) color)

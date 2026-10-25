@@ -16,12 +16,10 @@ licenses/
   simple-icons/
 ```
 
-Format 2 adds one runtime foreground for every canonical SVG:
+Format 2 is PNG-only:
 
 ```text
 pack.json
-icons/
-  <canonical-brand-id>.svg
 runtime/
   foreground-128/
     <canonical-brand-id>.png
@@ -77,7 +75,8 @@ Each `sources` entry records one exact upstream input:
 
 ### Brands
 
-Each `brands` entry is already canonicalized and has exactly one selected icon:
+Each format-1 `brands` entry is already canonicalized and has exactly one
+selected SVG:
 
 ```json
 {
@@ -109,13 +108,23 @@ Each `brands` entry is already canonicalized and has exactly one selected icon:
 
 Importers must use the supplied canonical ID and selected icon. They must not repeat provider selection, infer a different background, or recanonicalize the record from a provider slug.
 
-### Format 2 runtime icon
+### Format 2 PNG-only brand
 
-Format 2 keeps every format-1 canonical SVG and adds this required member to
-every brand:
+Format 2 removes the format-1 `icon` member and requires `runtimeIcon` on every
+brand. A complete v2 brand is conceptually:
 
 ```json
 {
+  "id": "amazon-web-services",
+  "displayName": "Amazon Web Services",
+  "backgroundColor": "#FFFFFF",
+  "issuerAliases": ["Amazon AWS", "Amazon Web Services", "AWS"],
+  "selectedSource": {
+    "provider": "simple-icons",
+    "sourceId": "amazonwebservices",
+    "metadata": {}
+  },
+  "sources": [],
   "runtimeIcon": {
     "path": "runtime/foreground-128/amazon-web-services.png",
     "mediaType": "image/png",
@@ -130,8 +139,9 @@ every brand:
 The path is exactly `runtime/foreground-128/<canonical-brand-id>.png`. It is
 provider-independent. `sha256` covers the exact packaged PNG bytes and is the
 runtime asset revision/cache key. A v2 archive is invalid unless every brand
-has exactly one referenced canonical SVG and one referenced runtime PNG. A v1
-archive must contain neither `runtimeIcon` nor `runtime/` files.
+has exactly one referenced runtime PNG and every PNG has exactly one brand.
+The `icon` member is forbidden even when null, and no SVG may occur in the v2
+archive. A v1 archive must contain neither `runtimeIcon` nor `runtime/` files.
 
 ### Issuer alias index
 
@@ -150,7 +160,7 @@ Normalization performs Unicode compatibility normalization, invariant case foldi
 
 ## Normalized SVG profile
 
-Every packaged icon:
+Every format-1 packaged SVG and every format-2 internal canonical reference:
 
 - is well-formed XML with one `svg` root;
 - has a finite, positive `viewBox`;
@@ -160,7 +170,9 @@ Every packaged icon:
 - remains within the per-entry size limit;
 - has passed the builder's source-versus-output visual comparison.
 
-Importers should still treat every archive and SVG as untrusted data and apply their own bounded parsing and path validation.
+Format-1 importers must treat every SVG as untrusted data and apply bounded
+parsing and path validation. Format-2 consumers never receive or parse SVG;
+the builder discards its internal canonical references before packaging.
 
 ## Runtime foreground profile `otp-harbor-foreground-v1`
 
@@ -171,7 +183,7 @@ This section is normative for format 2.
 - The canvas begins fully transparent. It contains foreground artwork only;
   `backgroundColor` is not baked into the PNG and is drawn separately by the
   consumer.
-- The canonical SVG is statically validated and normalized before rendering.
+- The builder-internal canonical SVG is statically validated and normalized before rendering.
   Only the normalized path-only SVG profile is passed to the bounded,
   in-process renderer. No scripts, animation, external references, remote
   resources, fonts, shell commands, or external programs are allowed.
@@ -183,10 +195,12 @@ This section is normative for format 2.
 - The output must contain at least one nontransparent pixel. Blank output,
   invalid bounds, failed decode, wrong dimensions, or visual mismatch rejects
   the candidate.
-- The PNG contains only `IHDR`, contiguous `IDAT`, and `IEND` chunks. Text,
+- The PNG contains exactly one `IHDR`, one or more contiguous `IDAT` chunks,
+  and exactly one final `IEND`, with no trailing bytes. Text,
   timestamps, EXIF, ICC/color profiles, and all other ancillary chunks are
   forbidden. The builder uses a fixed filter (None), a deterministic zlib
-  stream containing fixed-Huffman DEFLATE blocks, deterministic greedy match
+  stream containing fixed-Huffman DEFLATE blocks and scanline filter type 0,
+  deterministic greedy match
   selection, and fixed chunk ordering; equal RGBA pixels therefore produce
   equal PNG bytes. Dynamic-Huffman output and encoder-specific metadata are not
   used.
@@ -197,13 +211,20 @@ This section is normative for format 2.
 - Encoded content is limited to 1 MiB. Decoded allocation is exactly
   `128 * 128 * 4` bytes. The builder reopens the encoded PNG, validates its
   signature, chunks, CRCs, profile, dimensions, decoded budget, and SHA-256,
-  then compares it with the canonical SVG before packaging.
+  then compares the exact packaged bytes with the internal canonical SVG
+  reference before publication.
 
 The verification comparison draws `backgroundColor` into a 40 by 40 tile and
 fits the foreground into its centered 24 by 24 content square. It measures the
 pixel difference and palettes after composition. Source-to-canonical SVG
-verification remains mandatory as an earlier gate; canonical-to-runtime PNG
-verification is an additional v2 gate.
+verification remains a mandatory builder-internal earlier gate;
+internal-canonical-to-packaged-PNG verification is an additional v2 gate.
+The builder reopens the completed archive and repeats structural, hash,
+coverage, blank/covered, and visual-reference validation before atomic
+publication. Consumers must nevertheless treat an imported archive as
+untrusted and perform their own bounded validation. After one successful full
+PNG decode during staged import, installation may stream the validated bytes
+without a second decode while recomputing and checking SHA-256.
 
 ## Visual report
 
@@ -215,8 +236,9 @@ otp-harbor-icons.visual-report.json
 ```
 
 The visual report contains per-brand palettes, operations, and pixel-comparison
-metrics. For v1 it reports source-to-canonical SVG verification. For v2 it also
-records the runtime rendering operation and canonical-to-packaged-PNG metrics.
+metrics. For v1 it reports source-to-packaged-canonical-SVG verification. For
+v2 it records the operation from the selected source through the internal
+canonical reference to the final packaged PNG; no packaged SVG is implied.
 Its `formatVersion` equals the format version of the pack produced by the same
 transaction.
 It is not an archive member or import input. A successful catalog has
@@ -244,16 +266,17 @@ A compatible importer should reject the complete archive without changing previo
 - required manifest fields are missing or malformed;
 - archive entry counts, compressed size, expanded size, per-entry size, or compression ratios exceed local limits;
 - a ZIP path is absolute, traversing, duplicated, conflicting, or unreferenced;
-- an icon or license path is missing or outside its allowed root;
+- a required SVG, runtime PNG, or license path is missing or outside its allowed root;
 - canonical IDs, colors, hashes, or aliases violate the schema;
 - an alias references a nonexistent brand or maps ambiguously;
 - selected-source provenance is inconsistent;
-- an SVG violates the normalized profile.
+- a format-1 SVG violates the normalized profile;
 - a v1 manifest or archive contains a runtime member;
-- a v2 brand lacks either asset, uses a noncanonical runtime path/profile/media
-  type/dimension, has an invalid PNG, or declares the wrong runtime SHA-256;
-- canonical SVG and runtime PNG coverage is not one-to-one or their visual
-  comparison is unresolved.
+- a v2 manifest contains `icon`, a v2 archive contains any SVG, or a v2 brand
+  lacks its runtime asset;
+- a v2 brand uses a noncanonical runtime path/profile/media type/dimension, has
+  an invalid/blank/covered PNG, or declares the wrong runtime SHA-256;
+- brand and runtime-PNG coverage is not one-to-one.
 
 Validation and installation should be transactional: fully stage and validate the new pack before replacing any prior pack.
 
@@ -268,10 +291,10 @@ individual asset.
 Repository licenses do not necessarily grant trademark rights for the brands depicted by individual icons. Consumers remain responsible for applicable licenses, attribution requirements, trademark policies, and brand guidelines.
 
 Runtime PNGs are deterministic derivatives created by the user-side builder
-from the selected canonical SVG. Rasterization grants no additional copyright,
+from the selected source through an internal canonical SVG. Rasterization grants no additional copyright,
 trademark, endorsement, or redistribution right. A runtime asset inherits the
 same selected-source identity, provenance, evidence, notices, and limitations
-as its canonical SVG; it is not a separately sourced work.
+as its selected source; it is not a separately sourced work.
 
 ## Format evolution
 

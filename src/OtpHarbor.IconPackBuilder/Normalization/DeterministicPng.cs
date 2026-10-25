@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using SkiaSharp;
 
@@ -36,7 +37,12 @@ internal static class DeterministicPng
         return bytes;
     }
 
-    public static SKBitmap DecodeAndValidate(byte[] png, int expectedWidth, int expectedHeight, string path)
+    public static SKBitmap DecodeAndValidate(
+        byte[] png,
+        int expectedWidth,
+        int expectedHeight,
+        string path,
+        string? backgroundColor = null)
     {
         if (png.Length is 0 or > MaximumEncodedBytes)
             throw new InputValidationException($"Runtime PNG '{path}' is empty or exceeds the 1 MiB limit.");
@@ -60,6 +66,31 @@ internal static class DeterministicPng
             bitmap.Dispose();
             throw new InputValidationException($"Runtime PNG '{path}' is truncated.");
         }
+        var visiblePixels = 0;
+        var separatedPixels = 0;
+        var background = backgroundColor is null ? default : ParseColor(backgroundColor, path);
+        foreach (var pixel in bitmap.Pixels)
+        {
+            if (pixel.Alpha == 0) continue;
+            visiblePixels++;
+            if (backgroundColor is null) continue;
+            var alpha = pixel.Alpha / 255d;
+            var red = (byte)Math.Round(pixel.Red * alpha + background.Red * (1 - alpha));
+            var green = (byte)Math.Round(pixel.Green * alpha + background.Green * (1 - alpha));
+            var blue = (byte)Math.Round(pixel.Blue * alpha + background.Blue * (1 - alpha));
+            if (red != background.Red || green != background.Green || blue != background.Blue)
+                separatedPixels++;
+        }
+        if (visiblePixels == 0)
+        {
+            bitmap.Dispose();
+            throw new InputValidationException($"Runtime PNG '{path}' is blank.");
+        }
+        if (backgroundColor is not null && separatedPixels == 0)
+        {
+            bitmap.Dispose();
+            throw new InputValidationException($"Runtime PNG '{path}' is fully covered by backgroundColor '{backgroundColor}'.");
+        }
         return bitmap;
     }
 
@@ -72,6 +103,7 @@ internal static class DeterministicPng
         var offset = Signature.Length;
         var chunks = new List<string>();
         var sawIdat = false;
+        using var imageData = new MemoryStream();
         while (offset < png.Length)
         {
             if (png.Length - offset < 12)
@@ -102,6 +134,7 @@ internal static class DeterministicPng
                 if (chunks.Count == 1 || chunks[^2] is not ("IHDR" or "IDAT"))
                     throw new InputValidationException($"Runtime PNG '{path}' has non-contiguous image data.");
                 sawIdat = true;
+                imageData.Write(data);
             }
             else if (name == "IEND")
             {
@@ -117,6 +150,52 @@ internal static class DeterministicPng
         }
         if (chunks.Count < 3 || chunks[0] != "IHDR" || chunks[^1] != "IEND")
             throw new InputValidationException($"Runtime PNG '{path}' has an incomplete structure.");
+        ValidateScanlines(imageData.ToArray(), expectedWidth, expectedHeight, path);
+    }
+
+    private static void ValidateScanlines(byte[] zlib, int width, int height, string path)
+    {
+        var expectedLength = checked(height * (1 + width * 4));
+        var scanlines = new byte[expectedLength + 1];
+        var total = 0;
+        try
+        {
+            using var input = new MemoryStream(zlib, writable: false);
+            using var inflater = new ZLibStream(input, CompressionMode.Decompress);
+            while (total < scanlines.Length)
+            {
+                var read = inflater.Read(scanlines, total, scanlines.Length - total);
+                if (read == 0) break;
+                total += read;
+            }
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new InputValidationException($"Runtime PNG '{path}' has invalid zlib/DEFLATE image data: {ex.Message}");
+        }
+        if (total != expectedLength)
+            throw new InputValidationException($"Runtime PNG '{path}' has an invalid decoded scanline length.");
+        var stride = 1 + width * 4;
+        for (var y = 0; y < height; y++)
+            if (scanlines[y * stride] != 0)
+                throw new InputValidationException($"Runtime PNG '{path}' uses unsupported scanline filter type {scanlines[y * stride]}.");
+    }
+
+    private static SKColor ParseColor(string value, string path)
+    {
+        if (value.Length != 7 || value[0] != '#')
+            throw new InputValidationException($"Runtime PNG '{path}' received invalid backgroundColor '{value}'.");
+        try
+        {
+            return new SKColor(
+                Convert.ToByte(value.Substring(1, 2), 16),
+                Convert.ToByte(value.Substring(3, 2), 16),
+                Convert.ToByte(value.Substring(5, 2), 16));
+        }
+        catch (FormatException)
+        {
+            throw new InputValidationException($"Runtime PNG '{path}' received invalid backgroundColor '{value}'.");
+        }
     }
 
     private static byte[] EncodeFixedHuffmanZlib(ReadOnlySpan<byte> data)

@@ -51,7 +51,7 @@ sibling rights report.
 
 In format 2, the runtime PNG is a deterministic rendering of that same selected
 source. It does not receive a separate or broader evidence status: it inherits
-the canonical SVG's provider/source identity, pinned revision, license and
+the internal canonical SVG reference's provider/source identity, pinned revision, license and
 guideline metadata, notices, assessment, and limitations. Rasterization does
 not grant copyright or trademark rights.
 

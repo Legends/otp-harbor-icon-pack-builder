@@ -90,7 +90,7 @@ jobs:
             -p:DebugSymbols=false `
             --output $publishDirectory
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Exercise published executable with a production pack build
+      - name: Exercise published executable with a format-v2 production pack build
         shell: pwsh
         run: |
           $publishDirectory = Join-Path $env:RUNNER_TEMP "publish/${{ matrix.rid }}"
@@ -102,7 +102,7 @@ jobs:
           $executable = Join-Path $publishDirectory $executableName
           if ("${{ matrix.family }}" -ne "windows") { chmod +x $executable }
           $pack = Join-Path $env:RUNNER_TEMP "otp-harbor-icons.otphicons"
-          & $executable build --output $pack --non-interactive --force
+          & $executable build --format-version 2 --output $pack --non-interactive --force
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $visualReport = [System.IO.Path]::ChangeExtension($pack, ".visual-report.json")
           $rightsReport = [System.IO.Path]::ChangeExtension($pack, ".rights-report.json")
@@ -110,6 +110,59 @@ jobs:
             if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
               throw "The published executable did not create '$requiredFile'."
             }
+          }
+          $visual = Get-Content -LiteralPath $visualReport -Raw | ConvertFrom-Json -Depth 100
+          $rights = Get-Content -LiteralPath $rightsReport -Raw | ConvertFrom-Json -Depth 100
+          if ($visual.formatVersion -ne 2 -or $visual.unresolvedFailures -ne 0) {
+            throw "The visual report is not a successful format-v2 report."
+          }
+          if ($rights.formatVersion -ne 2) {
+            throw "The rights report is not a format-v2 report."
+          }
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($pack)
+          try {
+            $manifestEntries = @($archive.Entries | Where-Object FullName -CEQ "pack.json")
+            if ($manifestEntries.Count -ne 1) {
+              throw "The format-v2 pack must contain exactly one pack.json entry."
+            }
+            $reader = [System.IO.StreamReader]::new($manifestEntries[0].Open())
+            try {
+              $manifest = $reader.ReadToEnd() | ConvertFrom-Json -Depth 100
+            } finally {
+              $reader.Dispose()
+            }
+            if ($manifest.formatVersion -ne 2) {
+              throw "The production pack is not format version 2."
+            }
+            $brands = @($manifest.brands)
+            $pngEntries = @($archive.Entries | Where-Object FullName -CLike "runtime/foreground-128/*.png")
+            $svgEntries = @($archive.Entries | Where-Object FullName -CLike "*.svg")
+            if ($brands.Count -eq 0 -or $pngEntries.Count -ne $brands.Count) {
+              throw "The format-v2 pack does not contain exactly one runtime PNG per brand."
+            }
+            if ($svgEntries.Count -ne 0) {
+              throw "The PNG-only format-v2 pack contains SVG entries."
+            }
+            $entryNames = [System.Collections.Generic.HashSet[string]]::new(
+              [System.StringComparer]::Ordinal)
+            foreach ($entry in $archive.Entries) {
+              if (-not $entryNames.Add($entry.FullName)) {
+                throw "The format-v2 pack contains duplicate entry '$($entry.FullName)'."
+              }
+            }
+            foreach ($brand in $brands) {
+              if ($brand.PSObject.Properties.Name -ccontains "icon") {
+                throw "Format-v2 brand '$($brand.id)' contains the forbidden icon field."
+              }
+              $expectedPath = "runtime/foreground-128/$($brand.id).png"
+              if ($brand.runtimeIcon.path -cne $expectedPath -or -not $entryNames.Contains($expectedPath)) {
+                throw "Format-v2 brand '$($brand.id)' does not reference its exact runtime PNG path."
+              }
+            }
+          } finally {
+            $archive.Dispose()
           }
       - name: Package release artifact
         shell: pwsh

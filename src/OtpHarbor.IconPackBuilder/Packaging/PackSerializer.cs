@@ -27,10 +27,13 @@ public static class PackSerializer
             : CompressionLevel.SmallestSize;
         await WriteEntryAsync(archive, "pack.json", JsonSerializer.SerializeToUtf8Bytes(result.Document, JsonOptions),
             compression, cancellationToken);
-        CreateDirectoryEntry(archive, "icons/");
-        foreach (var icon in result.Icons.OrderBy(x => x.Key, StringComparer.Ordinal))
-            await WriteEntryAsync(archive, icon.Key, icon.Value, compression, cancellationToken);
-        if (result.Document.FormatVersion == 2)
+        if (result.Document.FormatVersion == 1)
+        {
+            CreateDirectoryEntry(archive, "icons/");
+            foreach (var icon in result.Icons.OrderBy(x => x.Key, StringComparer.Ordinal))
+                await WriteEntryAsync(archive, icon.Key, icon.Value, compression, cancellationToken);
+        }
+        else
         {
             CreateDirectoryEntry(archive, "runtime/");
             CreateDirectoryEntry(archive, "runtime/foreground-128/");

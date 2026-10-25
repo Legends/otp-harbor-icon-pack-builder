@@ -10,9 +10,10 @@ cross-border, disputed, or otherwise material uses.
 The review covers the exact upstream revisions pinned in
 `UpstreamDefinitions.cs`. It checks the providers' own license, attribution,
 trademark disclaimer, redistribution language, and usage guidance. The v2
-runtime PNG is a deterministic user-side derivative of the selected canonical
-SVG. It remains tied to that SVG's provider/source ID, source revision, rights
-evidence, guidelines, preserved notices, and limitations. Rasterization grants
+runtime PNG is a deterministic user-side derivative of the selected,
+builder-internal canonical SVG. It remains tied to that source's
+provider/source ID, source revision, rights evidence, guidelines, preserved
+notices, and limitations. Rasterization grants
 no new copyright, trademark, affiliation, sponsorship, endorsement, or
 redistribution right.
 

@@ -556,7 +556,7 @@ otp-harbor-icons.otphicons
 
 Do not expose `.zip` as the public pack extension.
 
-The internal structure should contain at minimum:
+Frozen format 1 contains:
 
 ```text
 pack.json
@@ -574,13 +574,30 @@ licenses/
   ...
 ```
 
+Format 2 is PNG-only and contains:
+
+```text
+pack.json
+runtime/
+  foreground-128/
+    <canonical-brand-id>.png
+licenses/
+  ...only referenced notices...
+```
+
+The format-2 manifest omits the format-1 `icon` member. Canonical normalized
+SVGs remain internal builder inputs for rendering and verification and must not
+be written to a format-2 archive.
+
 Compatible importers should only need to understand the `.otphicons` format.
 
 It should not need provider-specific Aegis/Simple Icons/Dashboard Icons parsing once the unified pack exists.
 
-Keep strict format version 1 for compatibility, and use separately selected
-format version 2 when deterministic display-ready runtime rasters are included.
-Never add runtime assets or v2 manifest members to a format-1 archive.
+Keep strict SVG-only format version 1 for compatibility. Separately selected
+format version 2 contains exactly one deterministic display-ready 128 by 128
+RGBA PNG per brand and no SVGs. Never add runtime assets or v2 manifest members
+to a format-1 archive, and never add the format-1 `icon` member or SVG files to
+a format-2 archive.
 
 # Default output location
 
@@ -838,8 +855,9 @@ Untrusted SVGs may only be rendered after static safety validation, through
 the bounded in-process normalization/verification pipeline, with external
 resource loading and executable content disabled. Do not use shell commands,
 external renderers, remote resources, scripts, or SVG animation. Canonical
-SVGs remain preserved as data; format version 2 additionally carries the
-deterministic display-ready raster produced by the builder.
+SVGs are preserved as packaged data only in format 1. In format 2 they are
+temporary builder-internal normalization and visual-reference data; only the
+deterministic display-ready PNG is packaged.
 
 Network downloads should use appropriate:
 

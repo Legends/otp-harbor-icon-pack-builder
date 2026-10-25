@@ -86,8 +86,13 @@ public sealed class CliTests
         Assert.Equal(1, (await PackReader.ReadAndValidateAsync(v1Path)).Document.FormatVersion);
         var v2Pack = await PackReader.ReadAndValidateAsync(v2Path);
         Assert.Equal(2, v2Pack.Document.FormatVersion);
-        Assert.All(v2Pack.Document.Brands, brand => Assert.NotNull(brand.RuntimeIcon));
-        Assert.Contains("not supported by current OTP Harbor releases", v2.Stdout);
+        Assert.All(v2Pack.Document.Brands, brand =>
+        {
+            Assert.Null(brand.Icon);
+            Assert.NotNull(brand.RuntimeIcon);
+        });
+        Assert.DoesNotContain(v2Pack.Files.Keys, path => path.EndsWith(".svg", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("older released OTP Harbor builds support only format v1", v2.Stdout);
         Assert.True(fixture.Acquirer.LastOptions!.Offline);
         using var visualReport = System.Text.Json.JsonDocument.Parse(
             await File.ReadAllTextAsync(Path.ChangeExtension(v2Path, ".visual-report.json")));
@@ -99,6 +104,31 @@ public sealed class CliTests
         using var rightsReport = System.Text.Json.JsonDocument.Parse(
             await File.ReadAllTextAsync(Path.ChangeExtension(v2Path, ".rights-report.json")));
         Assert.Equal(2, rightsReport.RootElement.GetProperty("formatVersion").GetInt32());
+        Assert.Equal(v2Pack.Document.Brands.Count,
+            rightsReport.RootElement.GetProperty("brands").GetArrayLength());
+        Assert.Equal(v2Pack.Document.Brands.Count,
+            visualReport.RootElement.GetProperty("brands").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task VersionTwoPackAndReportsAreByteDeterministic()
+    {
+        using var fixture = new CliFixture();
+        var first = fixture.FilePath("deterministic-first.otphicons");
+        var second = fixture.FilePath("deterministic-second.otphicons");
+
+        Assert.Equal(0, (await RunAsync([
+            "build", "--format-version", "2", "--offline", "--output", first, "--non-interactive"
+        ], fixture)).ExitCode);
+        Assert.Equal(0, (await RunAsync([
+            "build", "--format-version", "2", "--offline", "--output", second, "--non-interactive"
+        ], fixture)).ExitCode);
+
+        Assert.Equal(await File.ReadAllBytesAsync(first), await File.ReadAllBytesAsync(second));
+        Assert.Equal(await File.ReadAllBytesAsync(Path.ChangeExtension(first, ".visual-report.json")),
+            await File.ReadAllBytesAsync(Path.ChangeExtension(second, ".visual-report.json")));
+        Assert.Equal(await File.ReadAllBytesAsync(Path.ChangeExtension(first, ".rights-report.json")),
+            await File.ReadAllBytesAsync(Path.ChangeExtension(second, ".rights-report.json")));
     }
 
     [Theory]
@@ -304,6 +334,31 @@ public sealed class CliTests
 
         Assert.Equal(3, result.ExitCode);
         Assert.Equal(original, await File.ReadAllBytesAsync(outputPath));
+    }
+
+    [Fact]
+    public async Task PublicationFailureRollsBackPackAndSiblingReportsWithoutTemporaryFiles()
+    {
+        using var fixture = new CliFixture();
+        var outputPath = fixture.FilePath("transaction.otphicons");
+        var visualPath = Path.ChangeExtension(outputPath, ".visual-report.json");
+        var rightsPath = Path.ChangeExtension(outputPath, ".rights-report.json");
+        var originalPack = new byte[] { 1, 3, 3, 7 };
+        await File.WriteAllBytesAsync(outputPath, originalPack);
+        await File.WriteAllTextAsync(visualPath, "old visual");
+        Directory.CreateDirectory(rightsPath);
+
+        var result = await RunAsync([
+            "build", "--format-version", "2", "--offline", "--output", outputPath,
+            "--non-interactive", "--force"
+        ], fixture);
+
+        Assert.Equal(3, result.ExitCode);
+        Assert.Equal(originalPack, await File.ReadAllBytesAsync(outputPath));
+        Assert.Equal("old visual", await File.ReadAllTextAsync(visualPath));
+        Assert.True(Directory.Exists(rightsPath));
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(outputPath)!, ".transaction*.*tmp"));
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(outputPath)!, "*.bak"));
     }
 
     [Fact]

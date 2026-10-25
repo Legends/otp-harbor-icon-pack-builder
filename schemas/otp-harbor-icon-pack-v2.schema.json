@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://otp-harbor.example/schemas/otp-harbor-icon-pack-v2.schema.json",
   "title": "OTP Harbor Icon Pack v2",
-  "description": "Provider-independent canonical SVG and display-ready runtime assets stored in an .otphicons container.",
+  "description": "Provider-independent display-ready PNG runtime assets stored in an .otphicons container.",
   "type": "object",
   "additionalProperties": false,
   "required": ["formatVersion", "packId", "name", "sources", "brands", "issuerAliases"],
@@ -81,12 +81,11 @@
     "brand": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "displayName", "backgroundColor", "icon", "issuerAliases", "selectedSource", "sources", "runtimeIcon"],
+      "required": ["id", "displayName", "backgroundColor", "issuerAliases", "selectedSource", "sources", "runtimeIcon"],
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "displayName": { "type": "string", "minLength": 1 },
         "backgroundColor": { "type": "string", "pattern": "^#[0-9A-F]{6}$" },
-        "icon": { "type": "string", "pattern": "^icons/[a-z0-9]+(?:-[a-z0-9]+)*\\.svg$" },
         "issuerAliases": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
         "selectedSource": { "$ref": "#/$defs/sourceReference" },
         "sources": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/sourceReference" } },

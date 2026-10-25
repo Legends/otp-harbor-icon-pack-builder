@@ -23,7 +23,9 @@ public static class PackReader
         PackDocument document;
         try
         {
-            document = JsonSerializer.Deserialize<PackDocument>(await archive.ReadAsync(packPath, maximumPackJsonBytes, cancellationToken), PackSerializer.JsonOptions)
+            var manifestBytes = await archive.ReadAsync(packPath, maximumPackJsonBytes, cancellationToken);
+            ValidateVersionSpecificJsonShape(manifestBytes);
+            document = JsonSerializer.Deserialize<PackDocument>(manifestBytes, PackSerializer.JsonOptions)
                 ?? throw new InputValidationException("pack.json is empty.");
         }
         catch (JsonException ex) { throw new InputValidationException($"Malformed pack.json: {ex.Message}"); }
@@ -32,6 +34,22 @@ public static class PackReader
             files[filePath] = await archive.ReadAsync(filePath, 1_048_576, cancellationToken);
         Validate(document, files);
         return new ReadPack(document, files);
+    }
+
+    private static void ValidateVersionSpecificJsonShape(byte[] manifestBytes)
+    {
+        using var json = JsonDocument.Parse(manifestBytes, new JsonDocumentOptions { MaxDepth = 32 });
+        var root = json.RootElement;
+        if (!root.TryGetProperty("formatVersion", out var version)
+            || version.ValueKind != JsonValueKind.Number
+            || !version.TryGetInt32(out var formatVersion)
+            || formatVersion != 2
+            || !root.TryGetProperty("brands", out var brands)
+            || brands.ValueKind != JsonValueKind.Array)
+            return;
+        foreach (var brand in brands.EnumerateArray())
+            if (brand.ValueKind == JsonValueKind.Object && brand.TryGetProperty("icon", out _))
+                throw new InputValidationException("Version 2 brand manifests must not contain the format-1 icon member.");
     }
 
     public static void Validate(PackDocument document, IReadOnlyDictionary<string, byte[]> files)
@@ -91,13 +109,24 @@ public static class PackReader
                 || !ProviderHelpers.IsHexColor(brand.BackgroundColor[1..])
                 || brand.BackgroundColor != brand.BackgroundColor.ToUpperInvariant())
                 throw new InputValidationException($"Brand '{brand.Id}' has invalid backgroundColor '{brand.BackgroundColor}'.");
-            if (brand.Icon != $"icons/{brand.Id}.svg"
-                || !expectedFiles.Add(brand.Icon)
-                || !files.TryGetValue(brand.Icon, out var svg))
-                throw new InputValidationException($"Brand '{brand.Id}' references missing icon or invalid icon path '{brand.Icon}'.");
-            ProviderHelpers.ValidateSvg(svg, "otp-harbor-icons", brand.Icon, 1024 * 1024);
-            SvgNormalizer.ValidateCanonical(svg, brand.Icon);
-            ValidateRuntimeIcon(document.FormatVersion, brand, files, expectedFiles, svg);
+            if (document.FormatVersion == 1)
+            {
+                var expectedIcon = $"icons/{brand.Id}.svg";
+                if (brand.Icon != expectedIcon
+                    || !expectedFiles.Add(expectedIcon)
+                    || !files.TryGetValue(expectedIcon, out var svg))
+                    throw new InputValidationException($"Brand '{brand.Id}' references missing icon or invalid icon path '{brand.Icon}'.");
+                ProviderHelpers.ValidateSvg(svg, "otp-harbor-icons", expectedIcon, 1024 * 1024);
+                SvgNormalizer.ValidateCanonical(svg, expectedIcon);
+                if (brand.RuntimeIcon is not null)
+                    throw new InputValidationException($"Version 1 brand '{brand.Id}' must not contain runtimeIcon metadata.");
+            }
+            else
+            {
+                if (brand.Icon is not null)
+                    throw new InputValidationException($"Version 2 brand '{brand.Id}' must not contain the format-1 icon member.");
+                ValidateRuntimeIcon(brand, files, expectedFiles);
+            }
             if (brand.IssuerAliases is null || brand.IssuerAliases.Count == 0)
                 throw new InputValidationException($"Brand '{brand.Id}' has no issuer aliases.");
             if (brand.Sources is null || brand.Sources.Count == 0 || brand.SelectedSource is null)
@@ -144,20 +173,38 @@ public static class PackReader
                 throw new InputValidationException($"Pack contains unexpected or unreferenced file '{file}'.");
     }
 
+    public static void ValidateV2RuntimeVisuals(
+        ReadPack pack,
+        IReadOnlyDictionary<string, byte[]> canonicalIcons)
+    {
+        if (pack.Document.FormatVersion != 2)
+            throw new ArgumentException("Runtime visual validation requires a format-2 pack.", nameof(pack));
+        var expectedCanonicalPaths = pack.Document.Brands
+            .Select(brand => $"icons/{brand.Id}.svg")
+            .ToHashSet(StringComparer.Ordinal);
+        if (canonicalIcons.Count != expectedCanonicalPaths.Count
+            || canonicalIcons.Keys.Any(path => !expectedCanonicalPaths.Contains(path)))
+            throw new InputValidationException("Internal canonical SVG coverage does not match the version 2 manifest.");
+
+        foreach (var brand in pack.Document.Brands)
+        {
+            var canonicalPath = $"icons/{brand.Id}.svg";
+            if (!canonicalIcons.TryGetValue(canonicalPath, out var canonicalSvg))
+                throw new InputValidationException($"Brand '{brand.Id}' has no internal canonical SVG reference for runtime verification.");
+            SvgNormalizer.ValidateCanonical(canonicalSvg, canonicalPath);
+            var runtimePath = brand.RuntimeIcon!.Path;
+            var metrics = SvgVisualVerifier.CompareCanonicalToRuntimePng(
+                canonicalSvg, pack.Files[runtimePath], brand.BackgroundColor);
+            if (!metrics.Resolved)
+                throw new InputValidationException($"Runtime PNG '{runtimePath}' does not faithfully match the internal canonical SVG reference.");
+        }
+    }
+
     private static void ValidateRuntimeIcon(
-        int formatVersion,
         PackBrand brand,
         IReadOnlyDictionary<string, byte[]> files,
-        ISet<string> expectedFiles,
-        byte[] canonicalSvg)
+        ISet<string> expectedFiles)
     {
-        if (formatVersion == 1)
-        {
-            if (brand.RuntimeIcon is not null)
-                throw new InputValidationException($"Version 1 brand '{brand.Id}' must not contain runtimeIcon metadata.");
-            return;
-        }
-
         var runtime = brand.RuntimeIcon
             ?? throw new InputValidationException($"Version 2 brand '{brand.Id}' has no runtime icon.");
         var expectedPath = $"runtime/foreground-128/{brand.Id}.png";
@@ -181,10 +228,8 @@ public static class PackReader
         if (!CryptographicOperations.FixedTimeEquals(actualHash, declaredHash))
             throw new InputValidationException($"Runtime PNG '{expectedPath}' does not match its SHA-256.");
 
-        using var decoded = DeterministicPng.DecodeAndValidate(png, runtime.Width, runtime.Height, expectedPath);
-        var metrics = SvgVisualVerifier.CompareCanonicalToRuntimePng(canonicalSvg, png, brand.BackgroundColor);
-        if (!metrics.Resolved)
-            throw new InputValidationException($"Runtime PNG '{expectedPath}' does not faithfully match the canonical SVG.");
+        using var decoded = DeterministicPng.DecodeAndValidate(
+            png, runtime.Width, runtime.Height, expectedPath, brand.BackgroundColor);
     }
 
     private static void ValidateSourceReference(

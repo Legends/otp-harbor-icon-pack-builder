@@ -175,7 +175,7 @@ public sealed class BrandMerger
                 brand.Id,
                 brand.DisplayName,
                 brand.BackgroundColor,
-                brand.Icon,
+                formatVersion == 1 ? brand.Icon : null,
                 aliasResolution.AliasesByBrand[brand.Id],
                 brand.SelectedSource,
                 brand.Sources,

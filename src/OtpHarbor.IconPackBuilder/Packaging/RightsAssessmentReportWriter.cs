@@ -1,4 +1,5 @@
 using System.Text.Json;
+using OtpHarbor.IconPackBuilder.Domain;
 
 namespace OtpHarbor.IconPackBuilder.Packaging;
 
@@ -6,15 +7,20 @@ public static class RightsAssessmentReportWriter
 {
     public static async Task WriteAsync(
         string path,
-        int formatVersion,
+        PackDocument document,
         RightsPolicy policy,
         IReadOnlyList<RightsAssessmentEntry> assessments,
         int excludedRecords,
         CancellationToken cancellationToken = default)
     {
+        var formatVersion = document.FormatVersion;
         if (formatVersion is not (1 or 2))
             throw new ArgumentOutOfRangeException(nameof(formatVersion));
         var ordered = assessments.OrderBy(x => x.BrandId, StringComparer.Ordinal).ToArray();
+        var expectedIds = document.Brands.Select(brand => brand.Id).OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        var actualIds = ordered.Select(entry => entry.BrandId).OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        if (!expectedIds.SequenceEqual(actualIds, StringComparer.Ordinal))
+            throw new InputValidationException("Rights assessment report coverage does not exactly match the manifest brands.");
         var counts = ordered.GroupBy(x => RightsStatusValue(x.Status), StringComparer.Ordinal)
             .OrderBy(x => x.Key, StringComparer.Ordinal)
             .ToDictionary(x => x.Key, x => x.Count(), StringComparer.Ordinal);

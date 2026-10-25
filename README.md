@@ -150,17 +150,21 @@ Available options:
 
 `--offline` disables network access and requires every source to exist in the validated cache or be supplied as a local override. `--refresh` redownloads this builder release's pinned source set. `--non-interactive` never prompts, and it will not replace an existing output unless `--force` is also supplied.
 
-Format 1 remains the default because current OTP Harbor releases accept only
-that version. It contains canonical normalized SVGs and no runtime PNG files.
-Format 2 must be requested explicitly:
+Format 1 remains the default so older released OTP Harbor builds do not receive
+an unsupported pack silently. It contains canonical normalized SVGs and no
+runtime PNG files. Current v2-capable OTP Harbor builds accept format 2, which
+must still be requested explicitly until the coordinated v2 release switches
+the default intentionally:
 
 ```text
 OtpHarbor.IconPackBuilder build --format-version 2
 ```
 
-The builder prints a compatibility notice for v2. Each v2 brand keeps its
-canonical SVG and adds a deterministic transparent 128 by 128 foreground PNG
-for off-UI-thread decode and bitmap caching by a future compatible consumer.
+The builder prints a compatibility notice for v2. Format 2 is PNG-only: each
+brand has exactly one deterministic transparent 128 by 128 foreground PNG and
+no SVG is stored in the archive. Canonical SVG normalization remains an
+internal builder quality step. A future compatible consumer can decode the PNG
+off the UI thread and retain it in a bounded bitmap cache.
 See the [format v2 consumer handoff](docs/FORMAT-V2-CONSUMER-HANDOFF.md).
 
 ## How the catalog is created
@@ -186,7 +190,8 @@ only after static safety validation through the bounded in-process
 normalization/verification pipeline, with executable content and external
 resource loading disabled. When v2 is selected, that same pipeline produces a
 deterministic display-ready PNG, reopens it, verifies its exact profile and
-hash, and compares it with the canonical SVG. A pack is written only when the
+hash, and compares the packaged bytes with the internal canonical SVG reference.
+The internal SVG is discarded before v2 packaging. A pack is written only when the
 complete catalog passes these gates. The output contains exact upstream
 revisions, source hashes, selected-icon provenance, and the license, credit,
 disclaimer, README, or trademark documents recognized in the pinned source
@@ -217,13 +222,13 @@ Documented never means legally cleared. Manual conclusions belong in
 mappings/rights-assessments.json with an evidence URL and note. Repository
 licenses are not automatically treated as licenses for every depicted logo.
 
-[Simple Icons expressly warns](https://github.com/simple-icons/simple-icons/blob/develop/DISCLAIMER.md)
+[Simple Icons expressly warns](https://github.com/simple-icons/simple-icons/blob/dde88ab37611285a2bf1a7883c62be7e479794ba/DISCLAIMER.md)
 that its project-level CC0 dedication does not establish CC0 status for each
 icon and that license data can be missing or outdated. [Aegis Icons documents
-mixed upstream licensing](https://github.com/aegis-icons/aegis-icons) in its
+mixed upstream licensing](https://github.com/aegis-icons/aegis-icons/tree/ec6dae28f1fa87688d691f2c43265083a1797b3c) in its
 README; Aegis assets therefore remain unknown unless a source-specific manual
 assessment is added. [Dashboard Icons uses
-Apache-2.0](https://github.com/homarr-labs/dashboard-icons/blob/main/LICENSE)
+Apache-2.0](https://github.com/homarr-labs/dashboard-icons/blob/57e939e504eda0ea764098015da93aa666ad6f31/LICENSE)
 for its repository and separately disclaims ownership or endorsement of brand
 marks. Apache-2.0 itself does not grant trademark rights.
 

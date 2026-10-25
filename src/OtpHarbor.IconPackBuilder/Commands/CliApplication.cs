@@ -113,7 +113,7 @@ public static class CliApplication
 
             if (options.FormatVersion == 2)
                 WriteStatusLine(output,
-                    "[!] Compatibility: format v2 is not supported by current OTP Harbor releases; install it only in a v2-capable consumer.",
+                    "[!] Compatibility: older released OTP Harbor builds support only format v1; install this PNG-only v2 pack only in a v2-capable build.",
                     AnsiYellow,
                     useColor);
 
@@ -162,17 +162,22 @@ public static class CliApplication
             {
                 await PackSerializer.WriteAsync(temporary, result, cancellationToken);
                 await output.WriteLineAsync("Validating completed pack...");
-                await PackReader.ReadAndValidateAsync(temporary, cancellationToken);
-                await VisualVerificationReportWriter.WriteAsync(temporaryVisualReport, result.Document.FormatVersion,
+                var reopened = await PackReader.ReadAndValidateAsync(temporary, cancellationToken);
+                if (result.Document.FormatVersion == 2)
+                    PackReader.ValidateV2RuntimeVisuals(reopened, result.Icons);
+                await VisualVerificationReportWriter.WriteAsync(temporaryVisualReport, result.Document,
                     result.VisualVerification, cancellationToken);
-                await RightsAssessmentReportWriter.WriteAsync(temporaryRightsReport, result.Document.FormatVersion, options.RightsPolicy,
+                await RightsAssessmentReportWriter.WriteAsync(temporaryRightsReport, result.Document, options.RightsPolicy,
                     result.RightsAssessments ?? [], result.Summary.RightsExcludedRecords, cancellationToken);
 
+                cancellationToken.ThrowIfCancellationRequested();
+                PublishOutputsTransactionally([
+                    (temporary, fullOutput),
+                    (temporaryVisualReport, visualReportPath),
+                    (temporaryRightsReport, rightsReportPath)
+                ]);
                 // A successful pack must never be accompanied by a stale report from an older failed build.
                 if (File.Exists(conflictPath)) File.Delete(conflictPath);
-                File.Move(temporary, fullOutput, overwrite: options.Force || useInteractivePrompts);
-                File.Move(temporaryVisualReport, visualReportPath, overwrite: true);
-                File.Move(temporaryRightsReport, rightsReportPath, overwrite: true);
             }
             finally
             {
@@ -527,7 +532,43 @@ public static class CliApplication
         writer.WriteLine("  --provider-preference <ids>  Comma-separated provider IDs");
         writer.WriteLine("  --rights-policy <policy>     preserve (default), documented-only, or require-documented");
         writer.WriteLine("  --format-version <1|2>       Pack format; 1 is the compatibility default");
+        writer.WriteLine("                                  v1 is SVG-only; unreleased v2 is PNG-only (128x128 RGBA)");
         writer.WriteLine("  --conflict-report <json>     Override conflict-report path");
+    }
+
+    private static void PublishOutputsTransactionally(IReadOnlyList<(string Temporary, string Final)> outputs)
+    {
+        var transactionId = Guid.NewGuid().ToString("N");
+        var backups = new List<(string Backup, string Final)>();
+        var published = new List<string>();
+        try
+        {
+            foreach (var output in outputs)
+            {
+                if (!File.Exists(output.Final)) continue;
+                var backup = output.Final + "." + transactionId + ".bak";
+                File.Move(output.Final, backup);
+                backups.Add((backup, output.Final));
+            }
+            foreach (var output in outputs)
+            {
+                File.Move(output.Temporary, output.Final);
+                published.Add(output.Final);
+            }
+        }
+        catch
+        {
+            foreach (var path in published.AsEnumerable().Reverse())
+                if (File.Exists(path)) File.Delete(path);
+            foreach (var backup in backups.AsEnumerable().Reverse())
+                if (File.Exists(backup.Backup)) File.Move(backup.Backup, backup.Final);
+            throw;
+        }
+        finally
+        {
+            foreach (var backup in backups)
+                if (File.Exists(backup.Backup)) File.Delete(backup.Backup);
+        }
     }
 
     private sealed record CliOptions(

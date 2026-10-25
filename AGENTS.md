@@ -180,7 +180,7 @@ Do not assume the Dashboard Icons website catalog is identical to the native ico
 
 ## Canonical brand model
 
-The exact model can evolve, but each canonical brand should support at least:
+The exact model can evolve. Frozen format 1 uses this SVG-bearing brand shape:
 
 ```json
 {
@@ -200,6 +200,11 @@ The exact model can evolve, but each canonical brand should support at least:
 ```
 
 Also retain pack-level source metadata so a generated pack can state which upstream inputs were used.
+
+Format 2 is deliberately PNG-only: it omits `icon` entirely and requires one
+provider-independent `runtimeIcon` descriptor for
+`runtime/foreground-128/<canonical-brand-id>.png`. Canonical SVG remains an
+internal normalization and verification artifact of the builder for v2.
 
 ## Alias and issuer normalization
 
@@ -306,7 +311,7 @@ Recommended extension:
 
 It may internally be a ZIP archive.
 
-Recommended contents:
+Frozen format-1 contents:
 
 ```text
 pack.json
@@ -317,6 +322,10 @@ icons/
 licenses/
   ...
 ```
+
+Format 2 contains `pack.json`, exactly one
+`runtime/foreground-128/<canonical-brand-id>.png` per brand, and only referenced
+`licenses/` files. It contains no SVG files.
 
 The output schema must have an explicit schema/format version.
 
@@ -344,9 +353,9 @@ Do not execute scripts or binaries contained in source packs.
 Untrusted SVGs may only be rendered after static safety validation, through
 the bounded in-process normalization/verification pipeline, with external
 resource loading and executable content disabled. Rendering must never invoke
-native shell commands or external programs. Canonical SVGs remain data in the
-pack; format v2 may additionally contain deterministic display-ready runtime
-rasters produced by that pipeline.
+native shell commands or external programs. Canonical SVGs remain data in
+format 1. For format 2 they are internal builder artifacts only; the pack
+contains deterministic display-ready runtime PNGs and no SVG files.
 
 Use configurable but conservative limits.
 

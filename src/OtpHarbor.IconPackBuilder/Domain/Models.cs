@@ -58,7 +58,8 @@ public sealed record PackBrand(
     string Id,
     string DisplayName,
     string BackgroundColor,
-    string Icon,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? Icon,
     IReadOnlyList<string> IssuerAliases,
     SelectedSource SelectedSource,
     IReadOnlyList<SourceReference> Sources,

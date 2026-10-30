@@ -20,7 +20,14 @@ public sealed record SourceRecord(
     byte[] Svg,
     string Quality,
     IReadOnlyDictionary<string, string?> Metadata,
-    bool AutomaticCandidate = true);
+    bool AutomaticCandidate = true,
+    IReadOnlyList<SourceAssetVariant>? Variants = null);
+
+public sealed record SourceAssetVariant(
+    string SourceId,
+    string AssetPath,
+    byte[] Svg,
+    string Kind);
 
 public sealed record ProviderCatalog(
     string Provider,
@@ -57,14 +64,39 @@ public sealed record PackSource(
 public sealed record PackBrand(
     string Id,
     string DisplayName,
-    string BackgroundColor,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? BackgroundColor,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     string? Icon,
     IReadOnlyList<string> IssuerAliases,
     SelectedSource SelectedSource,
     IReadOnlyList<SourceReference> Sources,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    RuntimeIcon? RuntimeIcon = null);
+    RuntimeIcon? RuntimeIcon = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    ThemeAppearances? Appearances = null);
+
+public sealed record ThemeAppearances(
+    ThemeAppearance LightTheme,
+    ThemeAppearance DarkTheme);
+
+public sealed record ThemeAppearance(
+    RuntimeIcon Asset,
+    string AssetRole,
+    AppearanceBackground Background,
+    string Selection,
+    AppearanceSource Source,
+    string AppearanceSelectionReason);
+
+public sealed record AppearanceBackground(
+    string Mode,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? Color = null);
+
+public sealed record AppearanceSource(
+    string Provider,
+    string SourceId,
+    string AssetPath);
 
 public sealed record RuntimeIcon(
     string Path,
@@ -93,7 +125,19 @@ public sealed record PackBuildResult(
     BuildSummary Summary,
     IReadOnlyList<VisualVerificationEntry> VisualVerification,
     IReadOnlyList<RightsAssessmentEntry>? RightsAssessments = null,
-    IReadOnlyDictionary<string, byte[]>? RuntimeIcons = null);
+    IReadOnlyDictionary<string, byte[]>? RuntimeIcons = null,
+    IReadOnlyList<RuntimeVisualReference>? RuntimeVisualReferences = null);
+
+public sealed record RuntimeVisualReference(
+    string BrandId,
+    string Appearance,
+    string AssetPath,
+    string ExpectedSha256,
+    byte[] CanonicalSvg,
+    string PreviewBackgroundColor,
+    string? CompositionMode = null,
+    string? CompositionColor = null,
+    byte[]? SourceSvg = null);
 
 public enum RightsStatus
 {
@@ -139,7 +183,13 @@ public sealed record VisualVerificationEntry(
     int TotalPixels,
     IReadOnlyList<string> SourcePalette,
     IReadOnlyList<string> NormalizedPalette,
-    bool Resolved);
+    bool Resolved,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? Appearance = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? AssetRole = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? AppearanceSelectionReason = null);
 
 public sealed record BuildSummary(
     IReadOnlyDictionary<string, int> RecordsByProvider,

@@ -93,13 +93,20 @@ The builder contacts the official upstream GitHub repositories for:
 - Simple Icons;
 - Dashboard Icons.
 
-Each builder release carries a tested compatibility set of exact upstream releases and commits. Release-archive downloads are checked against source-controlled SHA-256 values, and commit-based sources use a full commit ID. Normal builds use those pinned sources instead of following a moving `latest` release or Dashboard Icons `main` branch. Updating the builder updates the supported source set; `--refresh` only redownloads the versions pinned by the installed builder. Downloads are cached so later builds can reuse validated files, and offline mode accepts only this release's supported cache identity. The cache locations are:
+Each builder release carries a tested compatibility set of exact upstream releases and commits. Release-archive downloads are checked against source-controlled SHA-256 values, and commit-based sources use a full commit ID. Normal builds use those pinned sources instead of following a moving `latest` release or Dashboard Icons `main` branch. Updating the builder updates the supported source set; `--refresh` only redownloads the versions pinned by the installed builder. The Dashboard cache includes metadata-referenced light/dark SVG variants from that same pinned commit and never mixes theme artwork across revisions. Downloads are cached so later builds can reuse validated files, and offline mode accepts only this release's supported cache identity. The cache locations are:
 
 ```text
 Windows: %LOCALAPPDATA%\OTP Harbor\IconPackBuilder\cache
 macOS:   ~/Library/Caches/OTP Harbor/IconPackBuilder
 Linux:   ${XDG_CACHE_HOME:-~/.cache}/otp-harbor/icon-pack-builder
 ```
+
+Independent provider downloads and Dashboard's individual pinned SVG requests
+use bounded I/O concurrency. Results are validated and assembled in stable
+provider/path order. Catalog rendering uses a conservative worker limit and,
+on Windows and Linux, quietly yields while total system CPU load remains above
+the configured target zone. This keeps the one-time build responsive without
+changing its deterministic output.
 
 No account data, issuer data, or generated pack is uploaded by this tool. The generated pack and reports remain on your computer.
 
@@ -137,35 +144,65 @@ Available options:
 --refresh
 --non-interactive
 --force
+--verbose
 --cache <directory>
 --mappings <directory>
 --provider-preference <comma-separated provider IDs>
 --rights-policy <preserve|documented-only|require-documented>
---format-version <1|2>
+--format-version <1|2|3>
 --conflict-report <path.json>
 --aegis <local.zip>
 --simple-icons <local.zip>
 --dashboard-icons <local.zip>
 ```
 
-`--offline` disables network access and requires every source to exist in the validated cache or be supplied as a local override. `--refresh` redownloads this builder release's pinned source set. `--non-interactive` never prompts, and it will not replace an existing output unless `--force` is also supplied.
+`--offline` disables network access and requires every source to exist in the validated cache or be supplied as a local override. `--refresh` redownloads this builder release's pinned source set. `--non-interactive` never prompts, and it will not replace an existing output unless `--force` is also supplied. Normal console output is intentionally concise; `--verbose` additionally shows diagnostic report paths, per-provider statistics, selection counts, and rights-evidence totals.
 
-Format 1 remains the default so older released OTP Harbor builds do not receive
-an unsupported pack silently. It contains canonical normalized SVGs and no
-runtime PNG files. Current v2-capable OTP Harbor builds accept format 2, which
-must still be requested explicitly until the coordinated v2 release switches
-the default intentionally:
+Format 3 is the default for current theme-aware OTP Harbor builds. Use
+`--format-version 1` or `--format-version 2` explicitly when producing a pack
+for a legacy consumer. Format 1 contains canonical normalized SVGs and no
+runtime PNG files. Format 2 is PNG-only and has one appearance per brand:
 
 ```text
 OtpHarbor.IconPackBuilder build --format-version 2
 ```
 
-The builder prints a compatibility notice for v2. Format 2 is PNG-only: each
-brand has exactly one deterministic transparent 128 by 128 foreground PNG and
-no SVG is stored in the archive. Canonical SVG normalization remains an
-internal builder quality step. A future compatible consumer can decode the PNG
-off the UI thread and retain it in a bounded bitmap cache.
+Each format-2 brand has exactly one deterministic transparent 128 by 128
+foreground PNG and no SVG is stored in the archive. Canonical SVG normalization
+remains an internal builder quality step. A compatible consumer can decode the
+PNG off the UI thread and retain it in a bounded bitmap cache.
 See the [format v2 consumer handoff](docs/FORMAT-V2-CONSUMER-HANDOFF.md).
+
+Format 3 is produced when `--format-version` is omitted; it may also be selected
+explicitly:
+
+```text
+OtpHarbor.IconPackBuilder build --format-version 3
+```
+
+It resolves separate light- and dark-theme appearances, preserves complete
+source compositions when appropriate, uses validated native Dashboard
+variants, retains associated Aegis variations for provenance and future
+reviewed mappings, and treats Simple Icons' documented color as foreground
+paint. A transparent Simple Icons mark that remains clearly visible on the
+current theme surface is emitted as a complete transparent icon without an
+extra tile; a deterministic neutral tile is retained only where contrast is
+needed. Reviewed monochrome source overrides may explicitly select a
+source-supported white foreground for dark theme while preserving the
+documented foreground color in light theme; these mappings are brand-specific,
+carry a rationale, and do not create a background tile. Identical appearances
+share one content-addressed PNG, so v3 does not blindly double the archive.
+Format-3 artwork is fitted inside an eight-pixel transparent safe inset so wide
+marks retain visible breathing room at list size. Reviewed badge compositions,
+such as the AdAway/AdBlock family, 2K, and .ENV, use explicit source-controlled
+mappings to preserve authentic colored badges, opaque internal details, and a
+transparent exterior; closed logo holes are never filled automatically.
+Source-painted backplates containing contrasting detail are preserved as
+complete embedded compositions without a second consumer tile. Complex
+text-free sources retain final-size canonical pixels when a raster fallback is
+needed, avoiding a blurry 24-to-128 upscale; SVG text stays on the deterministic
+canonical raster path. See the
+[format v3 consumer handoff](docs/FORMAT-V3-CONSUMER-HANDOFF.md).
 
 ## How the catalog is created
 
@@ -179,19 +216,24 @@ and a documented license may still impose conditions.
 
 The three upstream catalogs are merged into one deterministic set of canonical brands. Matching uses issuer aliases, not account names. Exact and explicitly mapped identities are preferred; ambiguous aliases are excluded instead of being assigned to the wrong brand.
 
-For format 2, runtime PNG rendering is deferred until candidates have been
-normalized and ranked. Unselected candidates do not consume rendering work
-unless a higher-ranked candidate fails and the deterministic fallback must be
-tried.
+For PNG-only formats, source records are statically validated and ranked before
+full normalization and runtime rendering. Only the selected candidate consumes
+the bounded raster work unless it fails and the deterministic fallback must be
+tried. Dashboard Icons is the default first provider, followed by Aegis and
+Simple Icons; explicit source overrides remain authoritative.
 
 Every selected SVG is converted to a restricted, safe representation and
 compared with its source at the target tile size. Untrusted SVGs may be rendered
 only after static safety validation through the bounded in-process
 normalization/verification pipeline, with executable content and external
-resource loading disabled. When v2 is selected, that same pipeline produces a
-deterministic display-ready PNG, reopens it, verifies its exact profile and
-hash, and compares the packaged bytes with the internal canonical SVG reference.
-The internal SVG is discarded before v2 packaging. A pack is written only when the
+resource loading disabled. When v2 is selected, that pipeline renders the
+internal canonical SVG and verifies the packaged PNG against it. For v3, the
+selected statically validated source appearance is materialized into its
+resolved paint profile and rendered once at the final 128-pixel geometry; the
+exact RGBA is deterministically encoded, reopened, and compared byte-for-pixel
+while the normalized SVG remains an internal structural and semantic audit
+artifact. Both theme appearances are verified independently and byte-identical
+assets are deduplicated by SHA-256. The internal SVG is discarded before PNG-only packaging. A pack is written only when the
 complete catalog passes these gates. The output contains exact upstream
 revisions, source hashes, selected-icon provenance, and the license, credit,
 disclaimer, README, or trademark documents recognized in the pinned source

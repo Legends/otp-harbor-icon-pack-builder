@@ -2,6 +2,22 @@
   "version": 1,
   "aliases": {
     "amazon-web-services": ["AWS", "Amazon AWS"],
-    "microsoft-365": ["Office 365", "M365"]
+    "microsoft-365": ["Office 365", "M365"],
+    "microsoft-access": ["Access", "MS Access"],
+    "microsoft-dataverse": ["Dataverse", "MS Dataverse"],
+    "microsoft-defender": ["Defender", "Windows Defender"],
+    "microsoft-excel": ["Excel", "MS Excel", "Excel 365"],
+    "microsoft-exchange": ["Exchange", "MS Exchange", "Exchange Online"],
+    "microsoft-intune": ["Intune", "MS Intune"],
+    "microsoft-office": ["Office", "MS Office"],
+    "microsoft-onedrive": ["OneDrive", "MS OneDrive"],
+    "microsoft-onenote": ["OneNote", "MS OneNote"],
+    "microsoft-outlook": ["Outlook", "MS Outlook", "Outlook 365"],
+    "microsoft-power-automate": ["Power Automate", "MS Power Automate"],
+    "microsoft-powerpoint": ["PowerPoint", "MS PowerPoint", "PowerPoint 365"],
+    "microsoft-sharepoint": ["SharePoint", "MS SharePoint", "SharePoint Online"],
+    "microsoft-teams": ["Teams", "MS Teams", "Teams 365"],
+    "microsoft-windows": ["Windows", "MS Windows"],
+    "microsoft-word": ["Word", "MS Word", "Word 365"]
   }
 }

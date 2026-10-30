@@ -94,7 +94,9 @@ the install transaction without exposing partial state.
 2. Verify frozen v1 import and SVG display remain unchanged.
 3. Exercise transactional upgrade, rollback, malformed-PNG, and corrupted-v2
    cases.
-4. Only then change the builder default from v1 to v2 in an intentional release.
+4. Retain explicit format selection after newer coordinated formats become the
+   builder default.
 
-Until that release exists, builder v1 remains the default, v2 requires
-`--format-version 2`, and the compatibility notice remains mandatory.
+The coordinated theme-aware release has since made format 3 the builder
+default. Format 2 remains frozen and available through `--format-version 2` for
+consumers that implement this contract.

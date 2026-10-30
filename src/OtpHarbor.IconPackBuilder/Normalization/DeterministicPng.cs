@@ -208,7 +208,6 @@ internal static class DeterministicPng
         bits.WriteBits(1, 2); // BTYPE=01, fixed Huffman codes
 
         var head = ArrayPool<int>.Shared.Rent(1 << 16);
-        var previous = ArrayPool<int>.Shared.Rent(data.Length);
         try
         {
             head.AsSpan(0, 1 << 16).Fill(-1);
@@ -220,28 +219,25 @@ internal static class DeterministicPng
                 if (position + 2 < data.Length)
                 {
                     var candidate = head[Hash(data, position)];
-                    var maximumLength = Math.Min(258, data.Length - position);
-                    for (var searched = 0;
-                         candidate >= 0 && position - candidate <= 32768 && searched < 128;
-                         candidate = previous[candidate], searched++)
+                    if (candidate >= 0 && position - candidate <= 32768)
                     {
-                        if (bestLength > 0 && data[candidate + bestLength - 1] != data[position + bestLength - 1])
-                            continue;
+                        var maximumLength = Math.Min(258, data.Length - position);
                         var length = 0;
                         while (length < maximumLength && data[candidate + length] == data[position + length]) length++;
-                        if (length <= bestLength) continue;
-                        bestLength = length;
-                        bestDistance = position - candidate;
-                        if (length == maximumLength) break;
+                        if (length >= 3)
+                        {
+                            bestLength = length;
+                            bestDistance = position - candidate;
+                        }
                     }
                 }
 
-                InsertHash(data, position, head, previous);
+                InsertHash(data, position, head);
                 if (bestLength >= 3)
                 {
                     WriteLengthDistance(bits, bestLength, bestDistance);
                     for (var index = 1; index < bestLength; index++)
-                        InsertHash(data, position + index, head, previous);
+                        InsertHash(data, position + index, head);
                     position += bestLength;
                 }
                 else
@@ -254,7 +250,6 @@ internal static class DeterministicPng
         finally
         {
             ArrayPool<int>.Shared.Return(head);
-            ArrayPool<int>.Shared.Return(previous);
         }
         WriteFixedSymbol(bits, 256);
         bits.Flush();
@@ -264,11 +259,10 @@ internal static class DeterministicPng
         return output.ToArray();
     }
 
-    private static void InsertHash(ReadOnlySpan<byte> data, int position, int[] head, int[] previous)
+    private static void InsertHash(ReadOnlySpan<byte> data, int position, int[] head)
     {
         if (position + 2 >= data.Length) return;
         var hash = Hash(data, position);
-        previous[position] = head[hash];
         head[hash] = position;
     }
 
@@ -327,11 +321,23 @@ internal static class DeterministicPng
     private static uint Adler32(ReadOnlySpan<byte> data)
     {
         const uint modulus = 65521;
+        // RFC 1950 permits reducing modulo in bounded chunks. Avoiding one
+        // integer division per RGBA byte materially reduces full-catalog PNG
+        // encoding time while producing exactly the same checksum.
+        const int maximumChunkLength = 5552;
         uint a = 1, b = 0;
-        foreach (var value in data)
+        var offset = 0;
+        while (offset < data.Length)
         {
-            a = (a + value) % modulus;
-            b = (b + a) % modulus;
+            var length = Math.Min(maximumChunkLength, data.Length - offset);
+            var end = offset + length;
+            while (offset < end)
+            {
+                a += data[offset++];
+                b += a;
+            }
+            a %= modulus;
+            b %= modulus;
         }
         return (b << 16) | a;
     }

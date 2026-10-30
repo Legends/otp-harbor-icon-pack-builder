@@ -125,7 +125,7 @@ Acquire only what the builder actually needs, especially:
 
 - metadata,
 - aliases,
-- SVG assets,
+- default SVG assets and metadata-referenced light/dark SVG variants,
 - relevant license/provenance data.
 
 Dashboard Icons identifies the repository under Apache License 2.0. Download
@@ -136,6 +136,9 @@ that this repository license grants rights to third-party trademarks depicted
 by individual icons; trademark and brand-usage restrictions remain separate.
 
 Do not download PNG/WebP or unrelated repository assets unless required.
+Theme variants must be acquired, statically validated, and cached from the
+same pinned revision as the default artwork; a missing optional variant falls
+back to validated default artwork and remains diagnosable.
 
 All Dashboard Icons metadata and SVGs within one build must come from the same pinned commit.
 
@@ -378,6 +381,7 @@ mappings/
   canonical-brands.json
   issuer-aliases.json
   source-overrides.json
+  appearance-compositions.json
 ```
 
 The canonical mapping data should support explicit equivalence between provider identities and `.otphicons` canonical IDs.
@@ -406,15 +410,16 @@ Selection must be deterministic.
 Use the following decision structure:
 
 1. explicit source override;
-2. configured provider preference;
-3. provider-specific quality rules;
-4. deterministic fallback.
+2. normalization and visual-fidelity eligibility;
+3. configured provider preference;
+4. theme-specific usability and provider-native variation quality within that provider for v3;
+5. deterministic quality-ranked fallback when a preferred source is unusable.
 
-The initial default provider preference may remain:
+The default provider preference is:
 
 ```text
-Aegis primary
 Dashboard Icons default SVG
+Aegis primary
 Simple Icons SVG
 ```
 
@@ -457,14 +462,16 @@ and visible in `selectedSource`.
 
 # Background and foreground colors
 
-The pack format requires a background color for every brand.
+Formats 1 and 2 require a background color for every brand. Format 3 instead
+declares background semantics per theme appearance.
 
 `backgroundColor` must therefore be a first-class canonical brand property in the generated pack.
 
 Use this deterministic precedence:
 
 1. explicit color override, if supported;
-2. native color metadata from the selected provider, e.g. Simple Icons `hex`;
+2. native color metadata from the selected provider, e.g. Simple Icons `hex`
+   for the frozen v1/v2 behavior;
 3. a full-logo background shape from the actually selected SVG, including a
    safe solid `fill` supplied through a presentation attribute, inline style,
    inherited group/root paint, or resolved provider CSS;
@@ -489,6 +496,13 @@ none satisfies every paint, choose the neutral with the greatest minimum
 contrast. Record whether a light or dark contrast background was generated.
 
 Do not take an arbitrary color from another merged provider record when a different provider's icon was selected.
+
+When source evidence supports both dark and light monochrome treatments, a
+specific provider/source selection may declare reviewed format-3 light/dark
+foreground colors in `mappings/source-overrides.json`. Such entries require a
+review rationale, apply only to the named canonical brand and source, preserve
+transparent exterior pixels, and must not change format 1 or 2. Do not infer a
+catalog-wide inversion or recoloring rule from these reviewed exceptions.
 
 Do not copy background extraction or provider interpretation into consumers.
 The builder owns this decision and writes the final value to the
@@ -516,18 +530,21 @@ synthetic fixtures in the repository; do not commit upstream artwork.
 Regression fixtures are necessary but not sufficient. Add a full-catalog
 visual-fidelity gate to every real build:
 
-1. render the selected upstream SVG with a deterministic, sandboxed reference
-   renderer;
-2. render the normalized SVG using only the canonical format profile;
-3. compose both at the format's 40x40 tile size with the 24x24 icon content area
-   and the emitted `backgroundColor`;
-4. compare visible alpha bounds, clipping, layer order, required foreground/fill
+1. statically validate and canonically normalize the selected upstream SVG;
+2. for SVG-bearing v1 and canonical-rendered v2 paths, compare the source and
+   normalized rendering using the canonical profile;
+3. for PNG-only v3, materialize the selected safe source paint once, render it
+   at the final 128-pixel/eight-pixel-inset geometry, deterministically encode
+   that exact bounded RGBA, reopen it, and compare the packaged pixels exactly;
+4. compose the applicable source/reference and packaged output at the format's
+   40x40 tile size with the 24x24 icon content area and emitted background;
+5. compare visible alpha bounds, clipping, layer order, required foreground/fill
    colors, and the final background;
-5. report source and normalized color palettes plus pixel-difference metrics for
+6. report source and packaged/reference color palettes plus pixel-difference metrics for
    every canonical brand;
-6. fail the build on every blank, clipped, covered, inverted, missing-color,
+7. fail the build on every blank, clipped, covered, inverted, missing-color,
    wrong-background, wrong-foreground, or unsupported-paint result;
-7. resolve each failure by correct normalization or deterministic alternate
+8. resolve each failure by correct normalization or deterministic alternate
    source selection; never suppress it or replace it with `#334155` merely to
    make the build pass.
 
@@ -598,6 +615,69 @@ format version 2 contains exactly one deterministic display-ready 128 by 128
 RGBA PNG per brand and no SVGs. Never add runtime assets or v2 manifest members
 to a format-1 archive, and never add the format-1 `icon` member or SVG files to
 a format-2 archive.
+
+Format version 3 is the builder default and may also be selected explicitly
+with `--format-version 3`. Formats 1 and 2 remain explicitly selectable for
+legacy consumers. V3 is PNG-only and resolves `lightTheme` and `darkTheme`
+appearances for every brand.
+Each appearance must declare:
+
+- one content-addressed 128 by 128 PNG asset using
+  `runtime/appearance-128/<lowercase-sha256>.png` and render profile
+  `otp-harbor-themed-appearance-v1`;
+- `assetRole` of `foreground` or `complete-icon`;
+- a `solid` uppercase color background for foreground artwork, or an
+  `embedded` background with no color for complete artwork;
+- the appearance source, deterministic selection classification, and a
+  human-readable selection reason.
+
+Both appearances are mandatory but may reference the same PNG. Equal PNG bytes
+must be shared instead of stored twice. V3 has no legacy `icon`, top-level
+`backgroundColor`, or `runtimeIcon` member and contains no SVG.
+
+V3 visible artwork is uniformly fitted within a centered 112 by 112 safe area
+on the 128 by 128 canvas, leaving an eight-pixel transparent inset. This margin
+applies to symbols and wordmarks without changing frozen v1/v2 rendering.
+
+V3 selection is provider-aware: explicit overrides win, followed by configured
+provider preference and then visual quality within that provider. Preserve
+original multicolor artwork; never automatically invert or recolor it.
+Dashboard variants are eligible only for their intended theme.
+Recognized Aegis `bg.var`, `fg.var`, and `fg.bg.var` files belong to their
+primary brand for provenance, not independent automatic brands. They are not
+automatic appearance candidates without an explicit reviewed mapping because
+their colors do not assert official light/dark brand usage.
+Simple Icons `hex` is foreground paint in v3, not an inferred tile background.
+If the materialized mark is sufficiently visible on the application theme
+surface, emit it as a transparent `complete-icon` without an extra tile. When
+it is not sufficiently visible, retain it on a deterministic contrasting tile
+rather than altering the mark. Contrast selection must reject backgrounds that
+hide any retained foreground paint.
+
+A source composition with a large source-painted backplate geometrically
+containing later contrasting detail is a `complete-icon` and must not be split
+or double-backed. The builder preserves that paint; it does not synthesize a
+generic tile or infer a matte from transparent holes. Adjacent multicolor marks
+remain transparent artwork. Both themes pass canonical structural/semantic
+validation plus exact selected-source-RGBA-to-packaged-PNG verification at the
+documented 40 by 40 tile / 24 by 24 content semantics. Ambiguous outcomes
+require actionable diagnostics and an explicit mapping/source override; they
+do not weaken or suppress the gate.
+
+For v3, render the selected statically validated source appearance once at the
+final 128 by 128 runtime size and compare the reopened packaged PNG exactly with
+that bounded RGBA. Do not enlarge a 24-pixel audit raster into the runtime PNG.
+The normalized SVG remains an internal structural and semantic audit artifact,
+not a packaged or consumer-facing asset.
+
+When reviewed source evidence establishes that a monochrome badge source uses
+transparent enclosed regions to represent intended opaque details, v3 may
+apply an explicit `appearance-compositions.json` mapping. The transform must
+preserve the declared brand paint, apply the declared matte only inside the
+reviewed badge, retain transparent antialiased exterior pixels, and emit
+`complete-icon`/`embedded` with selection `reviewed-badge-composition`. Never
+infer this operation from enclosed geometry alone: holes and counters in
+ordinary logos must remain transparent.
 
 # Default output location
 
@@ -736,6 +816,14 @@ path on its own emphasized bright-green `[OUTPUT] <path>` line, followed by a
 blank line. The `[OUTPUT]` marker must remain present when color is unavailable
 so the destination is easy to find in every console.
 
+Keep normal output concise. Label pinned identities according to their actual
+kind: Aegis release, Dashboard Icons revision, and Simple Icons version. Do not
+print cache-internal skipped-SVG paths, the visual-report path, repeated source
+summaries, per-provider record/selection statistics, or rights-evidence totals
+unless `--verbose` is specified. Continue producing every report regardless of
+verbosity, and always show the rights-report path because it is part of the
+legal/provenance handoff.
+
 When the Windows executable owns a newly opened console, including a direct
 launch or Visual Studio external console, wait at `Press Enter to close...`
 after success or failure. Do not pause when launched from an existing shell,
@@ -855,9 +943,9 @@ Untrusted SVGs may only be rendered after static safety validation, through
 the bounded in-process normalization/verification pipeline, with external
 resource loading and executable content disabled. Do not use shell commands,
 external renderers, remote resources, scripts, or SVG animation. Canonical
-SVGs are preserved as packaged data only in format 1. In format 2 they are
+SVGs are preserved as packaged data only in format 1. In format 2 and format 3 they are
 temporary builder-internal normalization and visual-reference data; only the
-deterministic display-ready PNG is packaged.
+deterministic display-ready PNGs are packaged.
 
 Network downloads should use appropriate:
 

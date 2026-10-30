@@ -16,14 +16,18 @@ public static class MappingLoader
         var aliasesPath = Path.Combine(directory, "issuer-aliases.json");
         var overridesPath = Path.Combine(directory, "source-overrides.json");
         var rightsPath = Path.Combine(directory, "rights-assessments.json");
+        var compositionsPath = Path.Combine(directory, "appearance-compositions.json");
         var canonical = await ReadAsync(canonicalPath, cancellationToken);
         var aliases = await ReadAsync(aliasesPath, cancellationToken);
         var overrides = await ReadAsync(overridesPath, cancellationToken);
         var rights = File.Exists(rightsPath)
             ? ParseRights(await ReadAsync(rightsPath, cancellationToken), rightsPath)
             : new Dictionary<string, RightsOverride>(StringComparer.OrdinalIgnoreCase);
+        var compositions = File.Exists(compositionsPath)
+            ? ParseAppearanceCompositions(await ReadAsync(compositionsPath, cancellationToken), compositionsPath)
+            : new Dictionary<string, AppearanceCompositionOverride>(StringComparer.Ordinal);
         return new MappingSet(ParseCanonical(canonical, canonicalPath), ParseAliases(aliases, aliasesPath),
-            ParseOverrides(overrides, overridesPath), rights);
+            ParseOverrides(overrides, overridesPath), rights, compositions);
     }
 
     public static async Task<MappingSet> LoadDefaultAsync(CancellationToken cancellationToken = default)
@@ -32,11 +36,13 @@ public static class MappingLoader
         var aliases = await ReadEmbeddedAsync("issuer-aliases.json", cancellationToken);
         var overrides = await ReadEmbeddedAsync("source-overrides.json", cancellationToken);
         var rights = await ReadEmbeddedAsync("rights-assessments.json", cancellationToken);
+        var compositions = await ReadEmbeddedAsync("appearance-compositions.json", cancellationToken);
         return new MappingSet(
             ParseCanonical(canonical, "embedded:canonical-brands.json"),
             ParseAliases(aliases, "embedded:issuer-aliases.json"),
             ParseOverrides(overrides, "embedded:source-overrides.json"),
-            ParseRights(rights, "embedded:rights-assessments.json"));
+            ParseRights(rights, "embedded:rights-assessments.json"),
+            ParseAppearanceCompositions(compositions, "embedded:appearance-compositions.json"));
     }
 
     private static async Task<JsonDocument> ReadAsync(string path, CancellationToken cancellationToken)
@@ -132,9 +138,49 @@ public static class MappingLoader
             EnsureVersion(root, path);
             if (!root.TryGetProperty("overrides", out var overrides) || overrides.ValueKind != JsonValueKind.Object)
                 throw new InputValidationException($"Mapping '{path}' requires an 'overrides' object.");
-            return overrides.EnumerateObject().OrderBy(x => x.Name, StringComparer.Ordinal)
-                .ToDictionary(x => x.Name, x => new SourceOverride(RequiredString(x.Value, "provider", path), RequiredString(x.Value, "sourceId", path)), StringComparer.Ordinal);
+            var result = new Dictionary<string, SourceOverride>(StringComparer.Ordinal);
+            foreach (var property in overrides.EnumerateObject().OrderBy(x => x.Name, StringComparer.Ordinal))
+            {
+                if (CanonicalId.FromName(property.Name) != property.Name)
+                    throw new InputValidationException($"Source override ID '{property.Name}' must be lowercase kebab-case.");
+                var lightForegroundColor = OptionalCanonicalColor(
+                    property.Value, "lightForegroundColor", property.Name, path);
+                var darkForegroundColor = OptionalCanonicalColor(
+                    property.Value, "darkForegroundColor", property.Name, path);
+                var appearanceRationale = OptionalString(property.Value, "appearanceRationale");
+                var hasThemePaint = lightForegroundColor is not null || darkForegroundColor is not null;
+                if (hasThemePaint
+                    && (appearanceRationale is null
+                        || !ProviderHelpers.IsSafeDisplayText(appearanceRationale, 512)))
+                    throw new InputValidationException(
+                        $"Source override '{property.Name}' requires a safe appearanceRationale when theme foreground colors are configured.");
+                if (!hasThemePaint && appearanceRationale is not null)
+                    throw new InputValidationException(
+                        $"Source override '{property.Name}' cannot define appearanceRationale without a theme foreground color.");
+                result.Add(property.Name, new SourceOverride(
+                    RequiredString(property.Value, "provider", path),
+                    RequiredString(property.Value, "sourceId", path),
+                    lightForegroundColor,
+                    darkForegroundColor,
+                    appearanceRationale));
+            }
+            return result;
         }
+    }
+
+    private static string? OptionalCanonicalColor(
+        JsonElement element,
+        string property,
+        string overrideId,
+        string path)
+    {
+        var color = OptionalString(element, property);
+        if (color is null) return null;
+        color = color.ToUpperInvariant();
+        if (color.Length != 7 || color[0] != '#' || !ProviderHelpers.IsHexColor(color[1..]))
+            throw new InputValidationException(
+                $"Source override '{overrideId}' in '{path}' has invalid {property} '{color}'.");
+        return color;
     }
 
     private static IReadOnlyDictionary<string, RightsOverride> ParseRights(JsonDocument document, string path)
@@ -160,6 +206,41 @@ public static class MappingLoader
                     throw new InputValidationException($"Rights assessment '{property.Name}' requires an HTTPS evidenceUrl.");
                 result.Add(property.Name, new RightsOverride(status, OptionalString(property.Value, "licenseType"),
                     evidenceUrl, OptionalString(property.Value, "note")));
+            }
+            return result;
+        }
+    }
+
+    private static IReadOnlyDictionary<string, AppearanceCompositionOverride> ParseAppearanceCompositions(
+        JsonDocument document,
+        string path)
+    {
+        using (document)
+        {
+            var root = document.RootElement;
+            EnsureVersion(root, path);
+            if (!root.TryGetProperty("compositions", out var compositions)
+                || compositions.ValueKind != JsonValueKind.Object)
+                throw new InputValidationException($"Mapping '{path}' requires a 'compositions' object.");
+            var result = new Dictionary<string, AppearanceCompositionOverride>(StringComparer.Ordinal);
+            foreach (var property in compositions.EnumerateObject().OrderBy(x => x.Name, StringComparer.Ordinal))
+            {
+                if (CanonicalId.FromName(property.Name) != property.Name)
+                    throw new InputValidationException($"Appearance composition ID '{property.Name}' must be lowercase kebab-case.");
+                var mode = RequiredString(property.Value, "mode", path);
+                if (mode != RuntimeIconRenderer.EnclosedMatteComposition)
+                    throw new InputValidationException($"Appearance composition '{property.Name}' has unsupported mode '{mode}'.");
+                var matteColor = RequiredString(property.Value, "matteColor", path).ToUpperInvariant();
+                if (matteColor.Length != 7 || matteColor[0] != '#'
+                    || !ProviderHelpers.IsHexColor(matteColor[1..]))
+                    throw new InputValidationException($"Appearance composition '{property.Name}' has invalid matteColor '{matteColor}'.");
+                var rationale = RequiredString(property.Value, "rationale", path);
+                if (!ProviderHelpers.IsSafeDisplayText(rationale, 512))
+                    throw new InputValidationException($"Appearance composition '{property.Name}' has an invalid rationale.");
+                result.Add(property.Name, new AppearanceCompositionOverride(
+                    RequiredString(property.Value, "provider", path),
+                    RequiredString(property.Value, "sourceId", path),
+                    mode, matteColor, rationale));
             }
             return result;
         }

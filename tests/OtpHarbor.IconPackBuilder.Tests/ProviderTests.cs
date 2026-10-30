@@ -115,11 +115,91 @@ public sealed class ProviderTests
         Assert.Equal("default", record.Quality);
         Assert.Equal("nextcloud-light", record.Metadata["lightVariant"]);
         Assert.Equal("nextcloud-dark", record.Metadata["darkVariant"]);
+        Assert.Collection(record.Variants!.OrderBy(x => x.Kind, StringComparer.Ordinal),
+            variant =>
+            {
+                Assert.Equal("dark-theme", variant.Kind);
+                Assert.Equal("nextcloud-light", variant.SourceId);
+            },
+            variant =>
+            {
+                Assert.Equal("light-theme", variant.Kind);
+                Assert.Equal("nextcloud-dark", variant.SourceId);
+            });
         Assert.Equal("fixture-author", record.Metadata["author"]);
         Assert.Equal("cloud,storage", record.Metadata["categories"]);
         Assert.Equal("Apache-2.0", catalog.Metadata["licenseType"]);
         Assert.Equal($"https://github.com/homarr-labs/dashboard-icons/blob/{revision}/LICENSE", catalog.Metadata["licenseUrl"]);
         Assert.Equal("LICENSE", Assert.Single(catalog.Licenses).FileName);
+    }
+
+    [Fact]
+    public async Task DashboardDoesNotPromoteNonSvgCatalogRecordsThatExistOnlyAsVariantAssets()
+    {
+        const string metadata = """
+        {
+          "alpha":{"base":"svg","colors":{"dark":"variant-only"}},
+          "variant-only":{"base":"png"}
+        }
+        """;
+        using var archive = new TestArchive(new Dictionary<string, string>
+        {
+            ["metadata.json"] = metadata,
+            ["svg/alpha.svg"] = TestData.Svg,
+            ["svg/variant-only.svg"] = TestData.Svg
+        });
+
+        var catalog = await new DashboardIconsProvider().LoadAsync(new("dashboard-icons", archive.Path));
+
+        var record = Assert.Single(catalog.Records);
+        Assert.Equal("alpha", record.SourceId);
+        Assert.Equal("variant-only", Assert.Single(record.Variants!).SourceId);
+    }
+
+    [Fact]
+    public async Task DashboardIgnoresSelfReferencingThemeVariants()
+    {
+        const string metadata = """
+        {
+          "portainer":{"base":"svg","colors":{"light":"portainer","dark":"portainer"}}
+        }
+        """;
+        using var archive = new TestArchive(new Dictionary<string, string>
+        {
+            ["metadata.json"] = metadata,
+            ["svg/portainer.svg"] = TestData.Svg
+        });
+
+        var catalog = await new DashboardIconsProvider().LoadAsync(new("dashboard-icons", archive.Path));
+
+        var record = Assert.Single(catalog.Records);
+        Assert.Equal("portainer", record.SourceId);
+        Assert.Empty(record.Variants!);
+    }
+
+    [Fact]
+    public async Task AegisAssociatesIntentionalThemeVariationsWithPrimaryRecord()
+    {
+        const string pack = """
+        { "uuid":"c553f06f-2a17-46ca-87f5-56af90dd0500", "name":"fixture", "version":2, "icons":[
+          {"name":"Example","filename":"icons/1_Primary/Example.svg","issuer":["Example"]},
+          {"name":"Example foreground","filename":"icons/2_Variations/Example fg.var.svg","issuer":[]},
+          {"name":"Example background","filename":"icons/2_Variations/Example bg.var.svg","issuer":[]}
+        ] }
+        """;
+        using var archive = new TestArchive(new Dictionary<string, string>
+        {
+            ["pack.json"] = pack,
+            ["icons/1_Primary/Example.svg"] = TestData.Svg,
+            ["icons/2_Variations/Example fg.var.svg"] = TestData.Svg,
+            ["icons/2_Variations/Example bg.var.svg"] = TestData.Svg
+        });
+
+        var catalog = await new AegisProvider().LoadAsync(new("aegis", archive.Path));
+        var primary = Assert.Single(catalog.Records, record => record.AutomaticCandidate);
+
+        Assert.Equal(["background-variation", "foreground-variation"],
+            primary.Variants!.Select(variant => variant.Kind));
     }
 
     [Fact]

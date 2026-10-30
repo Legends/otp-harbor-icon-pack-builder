@@ -12,7 +12,8 @@ public sealed record SvgNormalizationResult(
     string BackgroundColor,
     IReadOnlyList<string> Operations,
     IReadOnlyList<string> ForegroundColors,
-    SvgVisualMetrics VisualMetrics);
+    SvgVisualMetrics VisualMetrics,
+    byte[]? RuntimeRgba = null);
 
 public static partial class SvgNormalizer
 {
@@ -27,7 +28,12 @@ public static partial class SvgNormalizer
     public static SvgNormalizationResult Normalize(
         byte[] input,
         string backgroundColor,
-        bool materializeImplicitBlackFill = false)
+        bool materializeImplicitBlackFill = false,
+        bool preserveEmbeddedBackground = false,
+        string? implicitFillColor = null,
+        bool preferHighResolutionRasterFallback = false,
+        bool recognizeEmbeddedComposition = false,
+        bool useRuntimeVisualProfile = false)
     {
         ArgumentNullException.ThrowIfNull(input);
         if (input.Length is 0 or > MaximumSvgBytes)
@@ -53,6 +59,9 @@ public static partial class SvgNormalizer
         var root = document.Root;
         if (root is null || !root.Name.LocalName.Equals("svg", StringComparison.OrdinalIgnoreCase))
             throw new InputValidationException("SVG normalization requires an <svg> root.");
+        var containsText = root.DescendantsAndSelf()
+            .Any(element => element.Name.LocalName.Equals("text", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(element.Value));
 
         var operations = new SortedSet<string>(StringComparer.Ordinal);
         ResolveCssVariables(root, operations);
@@ -67,8 +76,16 @@ public static partial class SvgNormalizer
         var gradients = ReadGradients(root, ids, operations);
         var paths = new List<XElement>();
         var activeReferences = new HashSet<string>(StringComparer.Ordinal);
-        var initialStyle = materializeImplicitBlackFill
-            ? StyleState.Empty with { Fill = "#000000" }
+        var normalizedImplicitFill = implicitFillColor is null ? null : NormalizeColor(implicitFillColor)
+            ?? throw new InputValidationException($"SVG normalization received invalid implicit fill color '{implicitFillColor}'.");
+        var runtimeRootFill = useRuntimeVisualProfile ? NormalizeColor(Attribute(root, "fill")) : null;
+        var runtimeCurrentColor = useRuntimeVisualProfile
+            && string.Equals(Attribute(root, "fill"), "currentColor", StringComparison.OrdinalIgnoreCase)
+                ? NormalizeColor(Attribute(root, "color")) ?? "#000000"
+                : null;
+        var initialStyle = materializeImplicitBlackFill || normalizedImplicitFill is not null
+            || runtimeCurrentColor is not null || runtimeRootFill is not null
+            ? StyleState.Empty with { Fill = normalizedImplicitFill ?? runtimeCurrentColor ?? runtimeRootFill ?? "#000000" }
             : StyleState.Empty;
         VisitChildren(root, initialStyle, string.Empty, ids, css, gradients, activeReferences, paths, operations);
 
@@ -77,10 +94,18 @@ public static partial class SvgNormalizer
 
         var normalizedBackground = NormalizeColor(backgroundColor)
             ?? throw new InputValidationException($"SVG normalization received invalid background color '{backgroundColor}'.");
-        if (TryPromoteBackground(paths, viewBox, out var promoted))
+        if (TryFindBackground(paths, viewBox, out var promoted))
         {
-            normalizedBackground = promoted;
-            operations.Add("promoted-full-logo-background");
+            if (preserveEmbeddedBackground)
+            {
+                operations.Add("preserved-full-logo-background");
+            }
+            else
+            {
+                paths.RemoveAt(0);
+                normalizedBackground = promoted;
+                operations.Add("promoted-full-logo-background");
+            }
         }
 
         var foregroundColors = paths
@@ -115,27 +140,61 @@ public static partial class SvgNormalizer
         if (result.Length > MaximumSvgBytes)
             throw new InputValidationException("Normalized SVG exceeds the 1 MiB format limit.");
         var normalizedBytes = result.ToArray();
+        if (recognizeEmbeddedComposition && SvgVisualVerifier.RecognizesEmbeddedComposition(normalizedBytes))
+            operations.Add("recognized-embedded-composition");
         SvgVisualMetrics visualMetrics;
+        byte[]? runtimeRgba = null;
         try
         {
-            visualMetrics = SvgVisualVerifier.Compare(input, normalizedBytes, normalizedBackground);
-            if (!visualMetrics.Resolved)
+            if (useRuntimeVisualProfile && !containsText)
             {
-                // Prefer enough path-raster detail to remain crisp when rendered
-                // above the 24 px comparison size. Thin or heavily
-                // antialiased artwork can require an exact-size fallback to pass
-                // the format's strict visual-equivalence gate.
-                foreach (var rasterSize in new[] { 96, 48, 24 })
+                var runtimeDefaultFill = materializeImplicitBlackFill
+                    ? "#000000"
+                    : normalizedImplicitFill ?? runtimeCurrentColor ?? runtimeRootFill ?? "#FFFFFF";
+                // An explicit transparent root fill is an SVG paint instruction,
+                // not a missing color. Preserve it verbatim; descendants with
+                // their own fill/stroke still render normally.
+                var profiledSource = runtimeDefaultFill.Equals("none", StringComparison.Ordinal)
+                    ? input
+                    : MaterializeInheritedFill(input, runtimeDefaultFill, "runtime-source.svg");
+                var capture = SvgVisualVerifier.CaptureRuntimeRgba(
+                    profiledSource, normalizedBackground,
+                    RuntimeIconRenderer.ThemeContentInset);
+                visualMetrics = capture.SourceIdentity;
+                runtimeRgba = capture.SourceRgba;
+                operations.Add("runtime-source-reference-at-128px");
+            }
+            else
+            {
+                visualMetrics = SvgVisualVerifier.Compare(input, normalizedBytes, normalizedBackground);
+                if (!visualMetrics.Resolved)
                 {
-                    var rasterBytes = SvgVisualVerifier.RasterFlatten(input, normalizedBackground, rasterSize);
-                    if (rasterBytes.Length > MaximumSvgBytes) continue;
-                    ValidateCanonical(rasterBytes, "normalized-raster.svg");
-                    var rasterMetrics = SvgVisualVerifier.Compare(input, rasterBytes, normalizedBackground);
-                    visualMetrics = rasterMetrics;
-                    if (!rasterMetrics.Resolved) continue;
-                    normalizedBytes = rasterBytes;
-                    operations.Add($"raster-flattened-at-{rasterSize}px");
-                    break;
+                    // Prefer enough path-raster detail to remain crisp when rendered
+                    // above the 24 px comparison size. Thin or heavily
+                    // antialiased artwork can require an exact-size fallback to pass
+                    // the format's strict visual-equivalence gate.
+                    // SVG text depends on locally resolved fonts and native text
+                    // hinting. Keep those sources on the existing canonical
+                    // raster-SVG path so repeated builds cannot capture subtly
+                    // different glyph pixels. Text-free source paint is safe to
+                    // retain at the final runtime resolution.
+                    if (preferHighResolutionRasterFallback && !containsText)
+                    {
+                        runtimeRgba = SvgVisualVerifier.RenderRuntimeRgba(input, RuntimeIconRenderer.ThemeContentInset);
+                        operations.Add("runtime-rasterized-at-128px");
+                    }
+                    foreach (var rasterSize in new[] { 96, 48, 24 })
+                    {
+                        var rasterBytes = SvgVisualVerifier.RasterFlatten(input, normalizedBackground, rasterSize);
+                        if (rasterBytes.Length > MaximumSvgBytes) continue;
+                        ValidateCanonical(rasterBytes, "normalized-raster.svg");
+                        var rasterMetrics = SvgVisualVerifier.Compare(input, rasterBytes, normalizedBackground);
+                        visualMetrics = rasterMetrics;
+                        if (!rasterMetrics.Resolved) continue;
+                        normalizedBytes = rasterBytes;
+                        operations.Add($"raster-flattened-at-{rasterSize}px");
+                        break;
+                    }
                 }
             }
         }
@@ -147,7 +206,8 @@ public static partial class SvgNormalizer
             throw new InputValidationException($"SVG visual verification remained unresolved (mean difference {visualMetrics.MeanAbsoluteChannelDifference}, material pixels {visualMetrics.MateriallyDifferentPixels}).");
         if (normalizedBytes.Length > MaximumSvgBytes)
             throw new InputValidationException("Visually normalized SVG exceeds the 1 MiB format limit.");
-        return new SvgNormalizationResult(normalizedBytes, normalizedBackground, operations.ToArray(), foregroundColors, visualMetrics);
+        return new SvgNormalizationResult(normalizedBytes, normalizedBackground, operations.ToArray(), foregroundColors,
+            visualMetrics, runtimeRgba);
     }
 
     public static void ValidateCanonical(byte[] input, string path)
@@ -211,6 +271,94 @@ public static partial class SvgNormalizer
                     || !double.IsFinite(parsedStrokeWidth) || parsedStrokeWidth <= 0))
                 throw new InputValidationException($"Canonical SVG '{path}' contains an invalid stroke width.");
         }
+    }
+
+    public static byte[] ApplyCanonicalMonochromeColor(byte[] canonicalSvg, string color, string path)
+    {
+        ValidateCanonical(canonicalSvg, path);
+        var normalizedColor = NormalizeColor(color)
+            ?? throw new InputValidationException($"Canonical recoloring received invalid color '{color}'.");
+        XDocument document;
+        using (var stream = new MemoryStream(canonicalSvg, writable: false))
+        using (var reader = XmlReader.Create(stream, new XmlReaderSettings
+        {
+            DtdProcessing = DtdProcessing.Prohibit,
+            XmlResolver = null,
+            MaxCharactersInDocument = MaximumSvgBytes
+        }))
+            document = XDocument.Load(reader, LoadOptions.None);
+
+        var paths = document.Root!.Elements().Where(element => element.Name.LocalName == "path").ToArray();
+        var paints = paths.SelectMany(element => new[] { Attribute(element, "fill"), Attribute(element, "stroke") })
+            .Where(value => value is { Length: > 0 } && !value.Equals("none", StringComparison.OrdinalIgnoreCase))
+            .Select(value => NormalizeColor(value!))
+            .Where(value => value is not null)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (paints.Any(paint => paint != "#000000"))
+            throw new InputValidationException($"Canonical SVG '{path}' is not monochrome black and cannot use provider brand-color materialization.");
+        foreach (var element in paths)
+        {
+            if (element.Attribute("fill") is null || Attribute(element, "fill") == "#000000")
+                element.SetAttributeValue("fill", normalizedColor);
+            if (Attribute(element, "stroke") == "#000000")
+                element.SetAttributeValue("stroke", normalizedColor);
+        }
+        using var result = new MemoryStream();
+        using (var writer = XmlWriter.Create(result, new XmlWriterSettings
+        {
+            Encoding = new UTF8Encoding(false),
+            Indent = false,
+            OmitXmlDeclaration = true,
+            NewLineHandling = NewLineHandling.None
+        }))
+            document.Save(writer);
+        var output = result.ToArray();
+        ValidateCanonical(output, path);
+        return output;
+    }
+
+    public static byte[] MaterializeInheritedFill(byte[] sourceSvg, string color, string path)
+    {
+        ArgumentNullException.ThrowIfNull(sourceSvg);
+        var normalizedColor = NormalizeColor(color)
+            ?? throw new InputValidationException($"SVG fill materialization received invalid color '{color}'.");
+        XDocument document;
+        try
+        {
+            using var stream = new MemoryStream(sourceSvg, writable: false);
+            using var reader = XmlReader.Create(stream, new XmlReaderSettings
+            {
+                DtdProcessing = DtdProcessing.Prohibit,
+                XmlResolver = null,
+                MaxCharactersInDocument = MaximumSvgBytes
+            });
+            document = XDocument.Load(reader, LoadOptions.None);
+        }
+        catch (XmlException ex)
+        {
+            throw new InputValidationException($"SVG '{path}' could not materialize its inherited fill: {ex.Message}");
+        }
+        var root = document.Root;
+        if (root is null || !root.Name.LocalName.Equals("svg", StringComparison.OrdinalIgnoreCase))
+            throw new InputValidationException($"SVG '{path}' has no root svg element.");
+        if (root.Attribute("fill") is null)
+            root.SetAttributeValue("fill", normalizedColor);
+        else if (string.Equals(Attribute(root, "fill"), "currentColor", StringComparison.OrdinalIgnoreCase))
+            root.SetAttributeValue("fill", normalizedColor);
+        using var result = new MemoryStream();
+        using (var writer = XmlWriter.Create(result, new XmlWriterSettings
+        {
+            Encoding = new UTF8Encoding(false),
+            Indent = false,
+            OmitXmlDeclaration = true,
+            NewLineHandling = NewLineHandling.None
+        }))
+            document.Save(writer);
+        var output = result.ToArray();
+        if (output.Length > MaximumSvgBytes)
+            throw new InputValidationException($"SVG '{path}' exceeds the 1 MiB limit after fill materialization.");
+        return output;
     }
 
     private static void VisitChildren(
@@ -580,7 +728,7 @@ public static partial class SvgNormalizer
             }
     }
 
-    private static bool TryPromoteBackground(
+    private static bool TryFindBackground(
         IList<XElement> paths,
         (double X, double Y, double Width, double Height) viewBox,
         out string color)
@@ -597,7 +745,6 @@ public static partial class SvgNormalizer
         var isFullCircle = shape == "circle" && Math.Abs(viewBox.Width - viewBox.Height) < 0.000001
             && d == CirclePath(viewBox.X + viewBox.Width / 2, viewBox.Y + viewBox.Height / 2, viewBox.Width / 2);
         if (!isFullRect && !isFullCircle) return false;
-        paths.RemoveAt(0);
         color = normalized;
         return true;
     }

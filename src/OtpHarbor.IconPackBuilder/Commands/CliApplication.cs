@@ -14,6 +14,7 @@ public static class CliApplication
     private const int UsageErrorExitCode = 2;
     private const int BuildErrorExitCode = 3;
     private const int CancellationExitCode = 130;
+    private const int DefaultFormatVersion = 3;
     private const string DefaultOutputFileName = "otp-harbor-icons.otphicons";
     private const string AnsiGreen = "\u001b[32m";
     private const string AnsiBrightGreen = "\u001b[1;92m";
@@ -109,13 +110,7 @@ public static class CliApplication
                 new SourceAcquisitionOptions(cachePath, options.Offline, options.Refresh),
                 cancellationToken);
             ValidateAcquiredInputs(sourceInputs, providerLookup);
-            PrintResolvedSources(output, sourceInputs);
-
-            if (options.FormatVersion == 2)
-                WriteStatusLine(output,
-                    "[!] Compatibility: older released OTP Harbor builds support only format v1; install this PNG-only v2 pack only in a v2-capable build.",
-                    AnsiYellow,
-                    useColor);
+            PrintResolvedSources(output, sourceInputs, options.Verbose);
 
             await output.WriteLineAsync("Building canonical catalog...");
             var catalogs = new List<ProviderCatalog>();
@@ -165,6 +160,8 @@ public static class CliApplication
                 var reopened = await PackReader.ReadAndValidateAsync(temporary, cancellationToken);
                 if (result.Document.FormatVersion == 2)
                     PackReader.ValidateV2RuntimeVisuals(reopened, result.Icons);
+                else if (result.Document.FormatVersion == 3)
+                    PackReader.ValidateV3RuntimeVisuals(reopened, result.RuntimeVisualReferences ?? []);
                 await VisualVerificationReportWriter.WriteAsync(temporaryVisualReport, result.Document,
                     result.VisualVerification, cancellationToken);
                 await RightsAssessmentReportWriter.WriteAsync(temporaryRightsReport, result.Document, options.RightsPolicy,
@@ -187,7 +184,7 @@ public static class CliApplication
             }
 
             PrintSummary(output, result.Summary, result.Document.Sources, fullOutput, visualReportPath,
-                rightsReportPath, options.RightsPolicy, useColor);
+                rightsReportPath, options.RightsPolicy, options.Verbose, useColor);
             if (useInteractivePrompts)
             {
                 await output.WriteLineAsync();
@@ -246,9 +243,10 @@ public static class CliApplication
         var refresh = false;
         var nonInteractive = false;
         var force = false;
+        var verbose = false;
         var rightsPolicy = RightsPolicy.Preserve;
         var rightsPolicySpecified = false;
-        var formatVersion = 1;
+        var formatVersion = DefaultFormatVersion;
         var formatVersionSpecified = false;
         var start = args.Length == 0 ? 0 : 1;
 
@@ -257,13 +255,14 @@ public static class CliApplication
             var option = args[i];
             if (option is "--help" or "-h")
                 return new CliOptions(null, null, null, null, localOverrides, null, RightsPolicy.Preserve,
-                    1, false, false, false, false, true);
+                    DefaultFormatVersion, false, false, false, false, false, true);
             switch (option.ToLowerInvariant())
             {
                 case "--offline": offline = true; continue;
                 case "--refresh": refresh = true; continue;
                 case "--non-interactive": nonInteractive = true; continue;
                 case "--force": force = true; continue;
+                case "--verbose": verbose = true; continue;
             }
 
             if (!option.StartsWith("--", StringComparison.Ordinal))
@@ -295,8 +294,8 @@ public static class CliApplication
                     break;
                 case "format-version":
                     if (formatVersionSpecified) throw new InputValidationException("--format-version may be specified only once.");
-                    if (!int.TryParse(value, out formatVersion) || formatVersion is not (1 or 2))
-                        throw new InputValidationException("--format-version must be 1 or 2.");
+                    if (!int.TryParse(value, out formatVersion) || formatVersion is not (1 or 2 or 3))
+                        throw new InputValidationException("--format-version must be 1, 2, or 3.");
                     formatVersionSpecified = true;
                     break;
                 default: throw new InputValidationException($"Unknown option '{option}'.");
@@ -305,7 +304,7 @@ public static class CliApplication
 
         if (offline && refresh) throw new InputValidationException("--offline and --refresh cannot be used together.");
         return new CliOptions(outputPath, conflictPath, mappingsPath, cachePath, localOverrides, preference, rightsPolicy,
-            formatVersion, offline, refresh, nonInteractive, force, false);
+            formatVersion, offline, refresh, nonInteractive, force, verbose, false);
     }
 
     private static RightsPolicy ParseRightsPolicy(string value) => value.ToLowerInvariant() switch
@@ -352,8 +351,6 @@ public static class CliApplication
 
         await output.WriteLineAsync("OTP Harbor Icon Pack Builder");
         await output.WriteLineAsync("----------------------------");
-        await output.WriteLineAsync();
-        await output.WriteLineAsync("The tested Aegis Icons, Simple Icons, and Dashboard Icons sources pinned to this builder release will be merged.");
         await output.WriteLineAsync();
         await output.WriteLineAsync("Output:");
         await output.WriteLineAsync($"  {Path.GetFullPath(normalizedDefault)}");
@@ -453,19 +450,39 @@ public static class CliApplication
         output.WriteLine();
     }
 
-    private static void PrintResolvedSources(TextWriter output, IReadOnlyList<IconSourceInput> sources)
+    private static void PrintResolvedSources(
+        TextWriter output,
+        IReadOnlyList<IconSourceInput> sources,
+        bool verbose)
     {
         foreach (var source in sources.OrderBy(x => x.Provider, StringComparer.Ordinal))
         {
-            var identity = source.Version ?? source.Revision ?? "local override";
-            output.WriteLine($"Source {source.Provider}: {identity}");
+            output.WriteLine(SourceIdentityLine(source));
             var sourceDirectory = Path.GetDirectoryName(source.ArchivePath);
             var skippedReport = sourceDirectory is null
                 ? null
                 : Path.Combine(sourceDirectory, "skipped-svgs", "report.md");
-            if (skippedReport is not null && File.Exists(skippedReport))
+            if (verbose && skippedReport is not null && File.Exists(skippedReport))
                 output.WriteLine($"Skipped SVG report: {skippedReport}");
         }
+    }
+
+    private static string SourceIdentityLine(IconSourceInput source)
+    {
+        var local = source.Version is null && source.Revision is null;
+        return source.Provider switch
+        {
+            "aegis" => local
+                ? "Aegis Icons: local source override"
+                : $"Aegis Icons release: {source.Version ?? source.Revision}",
+            "dashboard-icons" => local
+                ? "Dashboard Icons: local source override"
+                : $"Dashboard Icons revision: {source.Revision ?? source.Version}",
+            "simple-icons" => local
+                ? "Simple Icons: local source override"
+                : $"Simple Icons version: {source.Version ?? source.Revision}",
+            _ => $"{source.Provider}: {source.Version ?? source.Revision ?? "local source override"}"
+        };
     }
 
     private static void PrintSummary(
@@ -476,20 +493,24 @@ public static class CliApplication
         string visualReportPath,
         string rightsReportPath,
         RightsPolicy rightsPolicy,
+        bool verbose,
         bool useColor)
     {
         output.WriteLine();
         WriteStatusLine(output, "[+] Icon pack created successfully.", AnsiGreen, useColor);
         WriteStatusLine(output, $"[OUTPUT] {path}", AnsiBrightGreen, useColor);
         output.WriteLine();
-        output.WriteLine($"Visual verification report: {visualReportPath}");
         output.WriteLine($"Rights evidence report: {rightsReportPath}");
-        output.WriteLine($"Sources: {string.Join(", ", sources.OrderBy(x => x.Provider, StringComparer.Ordinal).Select(x => $"{x.Provider}={x.Version ?? x.Revision ?? "local"}"))}");
-        output.WriteLine($"Records: {string.Join(", ", summary.RecordsByProvider.Select(x => $"{x.Key}={x.Value}"))}");
-        output.WriteLine($"Canonical brands: {summary.CanonicalBrands}; aliases: {summary.Aliases}; merged records: {summary.BrandsMerged}");
-        output.WriteLine($"Conflicts: {summary.Conflicts}; suppressed ambiguous aliases: {summary.SuppressedAliases}; invalid/skipped records: {summary.SkippedRecords}");
-        output.WriteLine($"Selected icons: {string.Join(", ", summary.SelectedIconsByProvider.Select(x => $"{x.Key}={x.Value}"))}");
-        output.WriteLine($"Rights evidence ({RightsAssessmentReportWriter.PolicyValue(rightsPolicy)}): {string.Join(", ", (summary.SelectedRightsByStatus ?? new Dictionary<string, int>()).Select(x => $"{x.Key}={x.Value}"))}; excluded source records: {summary.RightsExcludedRecords}");
+        output.WriteLine($"Catalog: {summary.CanonicalBrands} brands; {summary.Aliases} issuer aliases.");
+        if (verbose)
+        {
+            output.WriteLine($"Visual verification report: {visualReportPath}");
+            output.WriteLine($"Sources: {string.Join(", ", sources.OrderBy(x => x.Provider, StringComparer.Ordinal).Select(x => $"{x.Provider}={x.Version ?? x.Revision ?? "local"}"))}");
+            output.WriteLine($"Records: {string.Join(", ", summary.RecordsByProvider.Select(x => $"{x.Key}={x.Value}"))}");
+            output.WriteLine($"Merged records: {summary.BrandsMerged}; conflicts: {summary.Conflicts}; suppressed ambiguous aliases: {summary.SuppressedAliases}; invalid/skipped records: {summary.SkippedRecords}");
+            output.WriteLine($"Selected icons: {string.Join(", ", summary.SelectedIconsByProvider.Select(x => $"{x.Key}={x.Value}"))}");
+            output.WriteLine($"Rights evidence ({RightsAssessmentReportWriter.PolicyValue(rightsPolicy)}): {string.Join(", ", (summary.SelectedRightsByStatus ?? new Dictionary<string, int>()).Select(x => $"{x.Key}={x.Value}"))}; excluded source records: {summary.RightsExcludedRecords}");
+        }
         output.WriteLine();
         output.WriteLine("Legal notice: This pack contains third-party artwork, names, and trademarks.");
         output.WriteLine("Available upstream notices and provenance were preserved where supplied; this does not establish permission for every icon or use.");
@@ -527,12 +548,13 @@ public static class CliApplication
         writer.WriteLine("  --refresh                    Redownload this release's pinned upstream sources");
         writer.WriteLine("  --non-interactive            Never prompt");
         writer.WriteLine("  --force                      Replace an existing output");
+        writer.WriteLine("  --verbose                    Show diagnostic reports and detailed build statistics");
         writer.WriteLine("  --cache <directory>          Override the platform cache location");
         writer.WriteLine("  --mappings <directory>       Override mapping files");
         writer.WriteLine("  --provider-preference <ids>  Comma-separated provider IDs");
         writer.WriteLine("  --rights-policy <policy>     preserve (default), documented-only, or require-documented");
-        writer.WriteLine("  --format-version <1|2>       Pack format; 1 is the compatibility default");
-        writer.WriteLine("                                  v1 is SVG-only; unreleased v2 is PNG-only (128x128 RGBA)");
+        writer.WriteLine("  --format-version <1|2|3>     Pack format; 3 is the default");
+        writer.WriteLine("                                  v1 is SVG-only; v2 is one PNG per brand; v3 has themed PNG appearances");
         writer.WriteLine("  --conflict-report <json>     Override conflict-report path");
     }
 
@@ -584,5 +606,6 @@ public static class CliApplication
         bool Refresh,
         bool NonInteractive,
         bool Force,
+        bool Verbose,
         bool ShowHelp);
 }

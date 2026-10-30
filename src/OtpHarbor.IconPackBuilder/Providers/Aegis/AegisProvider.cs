@@ -87,10 +87,58 @@ public sealed class AegisProvider(ArchiveLimits? limits = null) : IIconSourcePro
                 throw new InputValidationException("aegis: pack contains more than 5,000 usable SVG records.");
         }
 
+        AssociateIntentionalVariations(records);
+
         return new ProviderCatalog(Id, Path.GetFileName(input.ArchivePath),
             await SecureZipArchive.Sha256Async(input.ArchivePath, cancellationToken), packMetadata,
             records, ProviderHelpers.ReadLicenses(archive, cancellationToken), skipped,
             input.Version ?? packMetadata["version"], input.Revision, input.SourceUrl);
+    }
+
+    private static void AssociateIntentionalVariations(IList<SourceRecord> records)
+    {
+        var primaryById = records
+            .Where(record => record.Quality.Equals("primary", StringComparison.Ordinal))
+            .ToDictionary(record => record.SourceId, StringComparer.OrdinalIgnoreCase);
+        var variantsByPrimary = new Dictionary<string, List<SourceAssetVariant>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var variation in records.Where(record => record.Quality.Equals("variation", StringComparison.Ordinal)))
+        {
+            var association = ParseVariation(variation.SourceId);
+            if (association is null || !primaryById.ContainsKey(association.Value.PrimarySourceId)) continue;
+            if (!variantsByPrimary.TryGetValue(association.Value.PrimarySourceId, out var variants))
+                variantsByPrimary[association.Value.PrimarySourceId] = variants = [];
+            variants.Add(new SourceAssetVariant(
+                variation.SourceId,
+                variation.AssetPath,
+                variation.Svg,
+                association.Value.Kind));
+        }
+
+        for (var index = 0; index < records.Count; index++)
+        {
+            var record = records[index];
+            if (!variantsByPrimary.TryGetValue(record.SourceId, out var variants)) continue;
+            records[index] = record with
+            {
+                Variants = variants.OrderBy(variant => variant.Kind, StringComparer.Ordinal)
+                    .ThenBy(variant => variant.SourceId, StringComparer.Ordinal)
+                    .ToArray()
+            };
+        }
+    }
+
+    private static (string PrimarySourceId, string Kind)? ParseVariation(string sourceId)
+    {
+        foreach (var suffix in new[]
+        {
+            (Suffix: " fg.bg.var", Kind: "foreground-background-variation"),
+            (Suffix: " bg.var", Kind: "background-variation"),
+            (Suffix: " fg.var", Kind: "foreground-variation")
+        })
+            if (sourceId.EndsWith(suffix.Suffix, StringComparison.OrdinalIgnoreCase)
+                && sourceId.Length > suffix.Suffix.Length)
+                return (sourceId[..^suffix.Suffix.Length], suffix.Kind);
+        return null;
     }
 
     private static bool IsGeneric(string path, JsonElement icon)

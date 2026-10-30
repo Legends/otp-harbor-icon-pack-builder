@@ -138,6 +138,7 @@ public sealed partial class DashboardIconsUpstreamDefinition : IUpstreamDefiniti
     private const long MaximumMetadataBytes = 8L * 1024 * 1024;
     private const long MaximumCompatibleSvgBytes = 1024L * 1024;
     private const long MaximumSvgDownloadBytes = 1024L * 1024;
+    private const int MaximumConcurrentSvgDownloads = 32;
     private static readonly DateTimeOffset StableTimestamp = new(1980, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
     public string Id => "dashboard-icons";
@@ -162,17 +163,25 @@ public sealed partial class DashboardIconsUpstreamDefinition : IUpstreamDefiniti
         var metadata = await client.GetBytesAsync(metadataUrl, MaximumMetadataBytes, cancellationToken);
         JsonDocument document;
         string[] slugs;
+        string[] defaultSlugs;
         try
         {
             document = JsonDocument.Parse(metadata, new JsonDocumentOptions { MaxDepth = 64 });
             if (document.RootElement.ValueKind != JsonValueKind.Object)
                 throw new InvalidDataException("dashboard-icons: metadata root must be an object.");
-            slugs = document.RootElement.EnumerateObject()
+            defaultSlugs = document.RootElement.EnumerateObject()
                 .Where(x => x.Value.ValueKind == JsonValueKind.Object
                     && x.Value.TryGetProperty("base", out var value)
                     && value.ValueKind == JsonValueKind.String
                     && value.GetString()!.Equals("svg", StringComparison.OrdinalIgnoreCase))
                 .Select(x => x.Name)
+                .ToArray();
+            var variantSlugs = document.RootElement.EnumerateObject()
+                .Where(x => x.Value.ValueKind == JsonValueKind.Object)
+                .SelectMany(x => ReadThemeVariantSlugs(x.Value))
+                .ToArray();
+            slugs = defaultSlugs.Concat(variantSlugs)
+                .Distinct(StringComparer.Ordinal)
                 .OrderBy(x => x, StringComparer.Ordinal)
                 .ToArray();
         }
@@ -180,7 +189,7 @@ public sealed partial class DashboardIconsUpstreamDefinition : IUpstreamDefiniti
         {
             throw new InvalidDataException($"dashboard-icons: malformed metadata from pinned revision '{source.Revision}': {ex.Message}", ex);
         }
-        if (slugs.Length is 0 or > 5_000 || slugs.Any(x => !SafeSlugRegex().IsMatch(x)))
+        if (slugs.Length is 0 or > 7_500 || slugs.Any(x => !SafeSlugRegex().IsMatch(x)))
             throw new InvalidDataException("dashboard-icons: metadata contains an invalid number of SVG records or an unsafe slug.");
 
         using (document)
@@ -192,11 +201,10 @@ public sealed partial class DashboardIconsUpstreamDefinition : IUpstreamDefiniti
             var included = new HashSet<string>(StringComparer.Ordinal);
             var skipped = new List<SkippedSvg>();
             var diagnosticsDirectory = Path.Combine(Path.GetDirectoryName(destinationPath)!, "skipped-svgs");
-            const int batchSize = 16;
-            for (var offset = 0; offset < slugs.Length; offset += batchSize)
+            for (var offset = 0; offset < slugs.Length; offset += MaximumConcurrentSvgDownloads)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var batch = slugs.Skip(offset).Take(batchSize).ToArray();
+                var batch = slugs.Skip(offset).Take(MaximumConcurrentSvgDownloads).ToArray();
                 var downloads = batch.Select(slug => DownloadSvgAsync(root, slug, client, cancellationToken)).ToArray();
                 var downloaded = await Task.WhenAll(downloads);
                 foreach (var item in downloaded)
@@ -219,13 +227,25 @@ public sealed partial class DashboardIconsUpstreamDefinition : IUpstreamDefiniti
             }
 
             await WriteEntryAsync(archive, "metadata.json",
-                CreateProviderMetadata(document.RootElement, included, skipped), cancellationToken);
+                CreateProviderMetadata(document.RootElement,
+                    defaultSlugs.Where(included.Contains).ToHashSet(StringComparer.Ordinal), skipped), cancellationToken);
             var license = await client.GetBytesAsync(root + "/LICENSE", 1024 * 1024, cancellationToken);
             await WriteEntryAsync(archive, "LICENSE", license, cancellationToken);
             var readme = await client.GetBytesAsync(root + "/README.md", 2 * 1024 * 1024, cancellationToken);
             await WriteEntryAsync(archive, "README.md", readme, cancellationToken);
             await WriteSkippedReportAsync(diagnosticsDirectory, source, skipped, cancellationToken);
         }
+    }
+
+    private static IEnumerable<string> ReadThemeVariantSlugs(JsonElement item)
+    {
+        if (!item.TryGetProperty("colors", out var colors) || colors.ValueKind != JsonValueKind.Object)
+            yield break;
+        foreach (var propertyName in new[] { "light", "dark" })
+            if (colors.TryGetProperty(propertyName, out var value)
+                && value.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(value.GetString()))
+                yield return value.GetString()!;
     }
 
     private static async Task<SvgDownload> DownloadSvgAsync(

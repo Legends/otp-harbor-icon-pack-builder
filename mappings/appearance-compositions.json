@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "compositions": {
+    "adaway": {
+      "provider": "simple-icons",
+      "sourceId": "adaway",
+      "mode": "enclosed-transparent-matte",
+      "matteColor": "#FFFFFF",
+      "rationale": "Reviewed badge composition: preserve the source red octagon and render its enclosed bird detail in white."
+    },
+    "adblock": {
+      "provider": "simple-icons",
+      "sourceId": "adblock",
+      "mode": "enclosed-transparent-matte",
+      "matteColor": "#FFFFFF",
+      "rationale": "Reviewed badge composition: preserve the source red octagon and render its enclosed hand detail in white."
+    },
+    "adblock-plus": {
+      "provider": "simple-icons",
+      "sourceId": "adblockplus",
+      "mode": "enclosed-transparent-matte",
+      "matteColor": "#FFFFFF",
+      "rationale": "Reviewed badge composition: preserve the source red badge and render its enclosed ABP lettering and border details in white."
+    },
+    "2k": {
+      "provider": "simple-icons",
+      "sourceId": "2k",
+      "mode": "enclosed-transparent-matte",
+      "matteColor": "#FFFFFF",
+      "rationale": "Reviewed badge composition: preserve the source red square and render its enclosed 2K lettering in white."
+    },
+    "env": {
+      "provider": "simple-icons",
+      "sourceId": "dotenv",
+      "mode": "enclosed-transparent-matte",
+      "matteColor": "#FFFFFF",
+      "rationale": "Reviewed badge composition: preserve the source yellow square and render its enclosed .ENV lettering in white."
+    }
+  }
+}

@@ -14,7 +14,7 @@ public static class RightsAssessmentReportWriter
         CancellationToken cancellationToken = default)
     {
         var formatVersion = document.FormatVersion;
-        if (formatVersion is not (1 or 2))
+        if (formatVersion is not (1 or 2 or 3))
             throw new ArgumentOutOfRangeException(nameof(formatVersion));
         var ordered = assessments.OrderBy(x => x.BrandId, StringComparer.Ordinal).ToArray();
         var expectedIds = document.Brands.Select(brand => brand.Id).OrderBy(value => value, StringComparer.Ordinal).ToArray();

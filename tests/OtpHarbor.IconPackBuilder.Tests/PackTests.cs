@@ -88,6 +88,62 @@ public sealed class PackTests
     }
 
     [Fact]
+    public async Task VersionThreeHasStrictThemedContentAddressedAppearancesAndSharesIdenticalPngs()
+    {
+        using var fixture = new TestArchive(new Dictionary<string, string> { ["placeholder"] = "x" });
+        var result = BuildResult(3);
+        var first = fixture.FilePath("first-v3.otphicons");
+        var second = fixture.FilePath("second-v3.otphicons");
+
+        await PackSerializer.WriteAsync(first, result);
+        await PackSerializer.WriteAsync(second, result);
+
+        Assert.Equal(await File.ReadAllBytesAsync(first), await File.ReadAllBytesAsync(second));
+        var read = await PackReader.ReadAndValidateAsync(first);
+        PackReader.ValidateV3RuntimeVisuals(read, result.RuntimeVisualReferences!);
+        var brand = Assert.Single(read.Document.Brands);
+        Assert.Equal(3, read.Document.FormatVersion);
+        Assert.Null(brand.Icon);
+        Assert.Null(brand.RuntimeIcon);
+        Assert.Null(brand.BackgroundColor);
+        Assert.NotNull(brand.Appearances);
+        var light = brand.Appearances!.LightTheme;
+        var dark = brand.Appearances.DarkTheme;
+        Assert.Equal(light.Asset.Path, dark.Asset.Path);
+        Assert.Matches("^runtime/appearance-128/[a-f0-9]{64}\\.png$", light.Asset.Path);
+        Assert.Equal(light.Asset.Sha256, DeterministicPng.Sha256(read.Files[light.Asset.Path]));
+        Assert.Equal("otp-harbor-themed-appearance-v1", light.Asset.RenderProfile);
+        Assert.Equal("foreground", light.AssetRole);
+        Assert.Equal("solid", light.Background.Mode);
+        Assert.Single(read.Files.Keys, path => path.EndsWith(".png", StringComparison.Ordinal));
+        Assert.DoesNotContain(read.Files.Keys, path => path.EndsWith(".svg", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task VersionThreeManifestUsesItsOwnFrozenSchemaShape()
+    {
+        using var fixture = new TestArchive(new Dictionary<string, string> { ["placeholder"] = "x" });
+        var path = fixture.FilePath("schema-v3.otphicons");
+        await PackSerializer.WriteAsync(path, BuildResult(3));
+        var schemaPath = Path.Combine(
+            MappingTests.FindRepositoryDirectory("schemas", "otp-harbor-icon-pack-v3.schema.json"),
+            "otp-harbor-icon-pack-v3.schema.json");
+        using var schema = JsonDocument.Parse(await File.ReadAllTextAsync(schemaPath));
+        Assert.Equal(3, schema.RootElement.GetProperty("properties").GetProperty("formatVersion").GetProperty("const").GetInt32());
+        using var file = File.OpenRead(path);
+        using var zip = new ZipArchive(file, ZipArchiveMode.Read);
+        using var pack = JsonDocument.Parse(zip.GetEntry("pack.json")!.Open());
+        var brand = pack.RootElement.GetProperty("brands")[0];
+        Assert.False(brand.TryGetProperty("icon", out _));
+        Assert.False(brand.TryGetProperty("runtimeIcon", out _));
+        Assert.False(brand.TryGetProperty("backgroundColor", out _));
+        Assert.True(brand.GetProperty("appearances").TryGetProperty("lightTheme", out _));
+        Assert.True(brand.GetProperty("appearances").TryGetProperty("darkTheme", out _));
+        Assert.False(schema.RootElement.GetProperty("$defs").GetProperty("brand")
+            .GetProperty("additionalProperties").GetBoolean());
+    }
+
+    [Fact]
     public async Task PackReadWriteRoundTripValidatesSelectedSourcesAndAssets()
     {
         using var fixture = new TestArchive(new Dictionary<string, string> { ["placeholder"] = "x" });
@@ -312,6 +368,45 @@ public sealed class PackTests
         var exception = await Assert.ThrowsAsync<InputValidationException>(() => PackReader.ReadAndValidateAsync(path));
 
         Assert.Contains("blank", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task VersionThreeReaderRejectsRoleBackgroundMismatchAndNonCanonicalAssetPath()
+    {
+        using var fixture = new TestArchive(new Dictionary<string, string> { ["placeholder"] = "x" });
+        var result = BuildResult(3);
+        var brand = Assert.Single(result.Document.Brands);
+        var appearances = brand.Appearances!;
+        var mismatched = appearances.LightTheme with
+        {
+            AssetRole = "complete-icon",
+            Background = new AppearanceBackground("solid", "#FFFFFF")
+        };
+        var mismatchPath = fixture.FilePath("v3-role-background-mismatch.otphicons");
+        await PackSerializer.WriteAsync(mismatchPath, result with
+        {
+            Document = CopyDocument(result.Document, brand with
+            {
+                Appearances = appearances with { LightTheme = mismatched }
+            })
+        });
+        Assert.Contains("background semantics", (await Assert.ThrowsAsync<InputValidationException>(
+            () => PackReader.ReadAndValidateAsync(mismatchPath))).Message);
+
+        var wrongAsset = appearances.LightTheme with
+        {
+            Asset = appearances.LightTheme.Asset with { Path = "runtime/appearance-128/github.png" }
+        };
+        var wrongPath = fixture.FilePath("v3-wrong-asset-path.otphicons");
+        await PackSerializer.WriteAsync(wrongPath, result with
+        {
+            Document = CopyDocument(result.Document, brand with
+            {
+                Appearances = appearances with { LightTheme = wrongAsset }
+            })
+        });
+        Assert.Contains("runtime asset metadata", (await Assert.ThrowsAsync<InputValidationException>(
+            () => PackReader.ReadAndValidateAsync(wrongPath))).Message);
     }
 
     [Theory]

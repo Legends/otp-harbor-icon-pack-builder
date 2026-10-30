@@ -41,6 +41,24 @@ public sealed class AcquisitionTests
     }
 
     [Fact]
+    public async Task IndependentProvidersAcquireConcurrentlyAndReturnInStableOrder()
+    {
+        using var fixture = new TestArchive(new Dictionary<string, string> { ["content.txt"] = "fixture" });
+        var probe = new ConcurrentAcquisitionProbe(3);
+        var definitions = new[] { "zeta", "alpha", "middle" }
+            .Select(id => new ProbedDefinition(id, fixture.Path, probe))
+            .ToArray();
+        using var acquirer = new SourceAcquirer(definitions, new StubRemoteClient());
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var results = await acquirer.AcquireAsync(new Dictionary<string, string>(),
+            new SourceAcquisitionOptions(fixture.FilePath("cache")), cancellation.Token);
+
+        Assert.Equal(["alpha", "middle", "zeta"], results.Select(result => result.Provider));
+        Assert.Equal(3, probe.MaximumConcurrent);
+    }
+
+    [Fact]
     public async Task OfflineUsesValidatedCacheWithoutNetworkResolution()
     {
         using var fixture = new TestArchive(new Dictionary<string, string> { ["content.txt"] = "fixture" });
@@ -194,8 +212,10 @@ public sealed class AcquisitionTests
         var root = $"https://raw.githubusercontent.com/homarr-labs/dashboard-icons/{sha}";
         var client = new StubRemoteClient(new Dictionary<string, byte[]>
         {
-            [root + "/metadata.json"] = Bytes("{\"alpha\":{\"base\":\"svg\"},\"png-only\":{\"base\":\"png\"}}"),
+            [root + "/metadata.json"] = Bytes("{\"alpha\":{\"base\":\"svg\",\"colors\":{\"light\":\"alpha-light\",\"dark\":\"png-only\"}},\"png-only\":{\"base\":\"png\"}}"),
             [root + "/svg/alpha.svg"] = Bytes(TestData.Svg),
+            [root + "/svg/alpha-light.svg"] = Bytes(TestData.Svg),
+            [root + "/svg/png-only.svg"] = Bytes(TestData.Svg),
             [root + "/LICENSE"] = Bytes("fixture license"),
             [root + "/README.md"] = Bytes("fixture readme")
         });
@@ -209,9 +229,15 @@ public sealed class AcquisitionTests
         Assert.All(client.Calls, url => Assert.StartsWith(root, url, StringComparison.Ordinal));
         using var file = File.OpenRead(destination);
         using var zip = new ZipArchive(file, ZipArchiveMode.Read);
-        Assert.Equal(["upstream-metadata.json", "svg/alpha.svg", "metadata.json", "LICENSE", "README.md"], zip.Entries.Select(x => x.FullName));
-        Assert.DoesNotContain(client.Calls, x => x.Contains("png-only", StringComparison.Ordinal));
+        Assert.Equal(["upstream-metadata.json", "svg/alpha.svg", "svg/alpha-light.svg", "svg/png-only.svg", "metadata.json", "LICENSE", "README.md"], zip.Entries.Select(x => x.FullName));
         Assert.All(zip.Entries, entry => Assert.Equal(1980, entry.LastWriteTime.Year));
+        using (var filteredMetadata = JsonDocument.Parse(zip.GetEntry("metadata.json")!.Open()))
+            Assert.False(filteredMetadata.RootElement.TryGetProperty("png-only", out _));
+
+        var catalog = await new DashboardIconsProvider().LoadAsync(new("dashboard-icons", destination, Revision: sha));
+        var record = Assert.Single(catalog.Records);
+        Assert.Equal("alpha", record.SourceId);
+        Assert.Contains(record.Variants!, variant => variant.SourceId == "png-only" && variant.Kind == "light-theme");
     }
 
     [Fact]
@@ -303,6 +329,58 @@ public sealed class AcquisitionTests
 
         public Task CreateSourceArchiveAsync(ResolvedUpstream source, string destinationPath,
             IRemoteContentClient client, CancellationToken cancellationToken) => throw new NotSupportedException();
+    }
+
+    private sealed class ConcurrentAcquisitionProbe(int expected)
+    {
+        private readonly TaskCompletionSource _allStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _current;
+        private int _maximum;
+
+        public int MaximumConcurrent => Volatile.Read(ref _maximum);
+
+        public async Task EnterAsync(CancellationToken cancellationToken)
+        {
+            var current = Interlocked.Increment(ref _current);
+            int observed;
+            do
+            {
+                observed = Volatile.Read(ref _maximum);
+                if (observed >= current) break;
+            } while (Interlocked.CompareExchange(ref _maximum, current, observed) != observed);
+            if (current == expected) _allStarted.TrySetResult();
+            await _allStarted.Task.WaitAsync(cancellationToken);
+            Interlocked.Decrement(ref _current);
+        }
+    }
+
+    private sealed class ProbedDefinition(
+        string id,
+        string sourceArchive,
+        ConcurrentAcquisitionProbe probe) : IUpstreamDefinition
+    {
+        public string Id => id;
+        public string? SupportedIdentity => "v1";
+
+        public async Task<ResolvedUpstream> ResolveSupportedAsync(
+            IRemoteContentClient client,
+            CancellationToken cancellationToken)
+        {
+            await probe.EnterAsync(cancellationToken);
+            return new ResolvedUpstream(Id, "v1", "v1", null,
+                $"https://example.invalid/{Id}/v1", $"https://example.invalid/download/{Id}/v1");
+        }
+
+        public Task CreateSourceArchiveAsync(
+            ResolvedUpstream source,
+            string destinationPath,
+            IRemoteContentClient client,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Copy(sourceArchive, destinationPath);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class StubRemoteClient(

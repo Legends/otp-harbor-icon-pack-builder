@@ -12,15 +12,29 @@ public static class VisualVerificationReportWriter
         CancellationToken cancellationToken = default)
     {
         var formatVersion = document.FormatVersion;
-        if (formatVersion is not (1 or 2))
+        if (formatVersion is not (1 or 2 or 3))
             throw new ArgumentOutOfRangeException(nameof(formatVersion));
-        var ordered = entries.OrderBy(x => x.BrandId, StringComparer.Ordinal).ToArray();
-        ValidateCoverage(document.Brands.Select(brand => brand.Id), ordered.Select(entry => entry.BrandId), "Visual verification");
+        var ordered = entries.OrderBy(x => x.BrandId, StringComparer.Ordinal)
+            .ThenBy(x => x.Appearance, StringComparer.Ordinal).ToArray();
+        if (formatVersion == 3)
+            ValidateCoverage(
+                document.Brands.SelectMany(brand => new[] { $"{brand.Id}/lightTheme", $"{brand.Id}/darkTheme" }),
+                ordered.Select(entry => $"{entry.BrandId}/{entry.Appearance}"),
+                "Visual verification");
+        else
+            ValidateCoverage(document.Brands.Select(brand => brand.Id), ordered.Select(entry => entry.BrandId), "Visual verification");
         var unresolved = ordered.Count(x => !x.Resolved);
         if (unresolved != 0)
             throw new InputValidationException($"Visual verification has {unresolved} unresolved failure(s); the pack cannot be published.");
 
-        var report = new
+        object report = formatVersion == 3 ? new
+        {
+            formatVersion,
+            totalBrands = document.Brands.Count,
+            totalAppearances = ordered.Length,
+            unresolvedFailures = unresolved,
+            appearances = ordered
+        } : new
         {
             formatVersion,
             totalBrands = ordered.Length,

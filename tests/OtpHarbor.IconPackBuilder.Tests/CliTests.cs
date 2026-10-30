@@ -24,12 +24,15 @@ public sealed class CliTests
         Assert.True(File.Exists(rightsReportPath));
         using (var report = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(visualReportPath)))
         {
-            Assert.Equal(1, report.RootElement.GetProperty("formatVersion").GetInt32());
+            Assert.Equal(3, report.RootElement.GetProperty("formatVersion").GetInt32());
             Assert.Equal(1, report.RootElement.GetProperty("totalBrands").GetInt32());
+            Assert.Equal(2, report.RootElement.GetProperty("totalAppearances").GetInt32());
             Assert.Equal(0, report.RootElement.GetProperty("unresolvedFailures").GetInt32());
-            var brand = report.RootElement.GetProperty("brands")[0];
-            Assert.True(brand.GetProperty("resolved").GetBoolean());
-            Assert.Equal(40 * 40, brand.GetProperty("totalPixels").GetInt32());
+            foreach (var appearance in report.RootElement.GetProperty("appearances").EnumerateArray())
+            {
+                Assert.True(appearance.GetProperty("resolved").GetBoolean());
+                Assert.True(appearance.GetProperty("totalPixels").GetInt32() > 0);
+            }
         }
         Assert.DoesNotContain("Usage:", result.Stdout);
     }
@@ -46,7 +49,7 @@ public sealed class CliTests
         using var report = System.Text.Json.JsonDocument.Parse(
             await File.ReadAllTextAsync(Path.ChangeExtension(outputPath, ".rights-report.json")));
         Assert.True(report.RootElement.GetProperty("notLegalClearance").GetBoolean());
-        Assert.Equal(1, report.RootElement.GetProperty("formatVersion").GetInt32());
+        Assert.Equal(3, report.RootElement.GetProperty("formatVersion").GetInt32());
         Assert.Equal("preserve", report.RootElement.GetProperty("policy").GetString());
         Assert.True(report.RootElement.GetProperty("brands").GetArrayLength() > 0);
     }
@@ -66,23 +69,83 @@ public sealed class CliTests
         var pack = await PackReader.ReadAndValidateAsync(outputPath);
         Assert.Equal(["aegis", "dashboard-icons", "simple-icons"], pack.Document.Sources.Select(x => x.Provider));
         Assert.Equal("github", Assert.Single(pack.Document.Brands).Id);
-        Assert.Equal("simple-icons", Assert.Single(pack.Document.Brands).SelectedSource.Provider);
+        Assert.Equal("dashboard-icons", Assert.Single(pack.Document.Brands).SelectedSource.Provider);
     }
 
     [Fact]
-    public async Task FormatVersionOneIsDefaultAndVersionTwoIsExplicitWithCompatibilityNotice()
+    public async Task DefaultBuildOutputUsesTypedSourceIdentitiesAndHidesDiagnosticPaths()
     {
         using var fixture = new CliFixture();
+        var skippedDirectory = Path.Combine(Path.GetDirectoryName(fixture.Dashboard.Path)!, "skipped-svgs");
+        Directory.CreateDirectory(skippedDirectory);
+        await File.WriteAllTextAsync(Path.Combine(skippedDirectory, "report.md"), "fixture");
+
+        var result = await RunAsync([
+            "build", "--output", fixture.FilePath("concise.otphicons"), "--non-interactive"
+        ], fixture);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Aegis Icons release: 7", result.Stdout);
+        Assert.Contains($"Dashboard Icons revision: {new string('a', 40)}", result.Stdout);
+        Assert.Contains("Simple Icons version: 1.2.3", result.Stdout);
+        Assert.DoesNotContain("The tested Aegis Icons", result.Stdout);
+        Assert.DoesNotContain("Skipped SVG report:", result.Stdout);
+        Assert.DoesNotContain("Visual verification report:", result.Stdout);
+        Assert.DoesNotContain("Sources:", result.Stdout);
+        Assert.DoesNotContain("Records:", result.Stdout);
+        Assert.DoesNotContain("Rights evidence (", result.Stdout);
+        Assert.Contains("Rights evidence report:", result.Stdout);
+        Assert.Contains("Catalog: 1 brands;", result.Stdout);
+    }
+
+    [Fact]
+    public async Task VerboseBuildOutputIncludesDiagnosticReportsAndStatistics()
+    {
+        using var fixture = new CliFixture();
+        var skippedDirectory = Path.Combine(Path.GetDirectoryName(fixture.Dashboard.Path)!, "skipped-svgs");
+        Directory.CreateDirectory(skippedDirectory);
+        var skippedReport = Path.Combine(skippedDirectory, "report.md");
+        await File.WriteAllTextAsync(skippedReport, "fixture");
+
+        var result = await RunAsync([
+            "build", "--verbose", "--output", fixture.FilePath("verbose.otphicons"), "--non-interactive"
+        ], fixture);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains($"Skipped SVG report: {skippedReport}", result.Stdout);
+        Assert.Contains("Visual verification report:", result.Stdout);
+        Assert.Contains("Sources:", result.Stdout);
+        Assert.Contains("Records:", result.Stdout);
+        Assert.Contains("Selected icons:", result.Stdout);
+        Assert.Contains("Rights evidence (preserve):", result.Stdout);
+    }
+
+    [Fact]
+    public async Task FormatVersionThreeIsDefaultAndLegacyVersionsRemainExplicit()
+    {
+        using var fixture = new CliFixture();
+        var v3Path = fixture.FilePath("format-v3-default.otphicons");
         var v1Path = fixture.FilePath("format-v1.otphicons");
         var v2Path = fixture.FilePath("format-v2.otphicons");
 
-        var v1 = await RunAsync(["build", "--output", v1Path, "--non-interactive"], fixture);
+        var v3 = await RunAsync(["build", "--output", v3Path, "--non-interactive"], fixture);
+        var v1 = await RunAsync([
+            "build", "--format-version", "1", "--offline", "--output", v1Path, "--non-interactive"
+        ], fixture);
         var v2 = await RunAsync([
             "build", "--format-version", "2", "--offline", "--output", v2Path, "--non-interactive"
         ], fixture);
 
+        Assert.Equal(0, v3.ExitCode);
         Assert.Equal(0, v1.ExitCode);
         Assert.Equal(0, v2.ExitCode);
+        var v3Pack = await PackReader.ReadAndValidateAsync(v3Path);
+        Assert.Equal(3, v3Pack.Document.FormatVersion);
+        Assert.All(v3Pack.Document.Brands, brand =>
+        {
+            Assert.NotNull(brand.Appearances?.LightTheme);
+            Assert.NotNull(brand.Appearances?.DarkTheme);
+        });
         Assert.Equal(1, (await PackReader.ReadAndValidateAsync(v1Path)).Document.FormatVersion);
         var v2Pack = await PackReader.ReadAndValidateAsync(v2Path);
         Assert.Equal(2, v2Pack.Document.FormatVersion);
@@ -92,7 +155,7 @@ public sealed class CliTests
             Assert.NotNull(brand.RuntimeIcon);
         });
         Assert.DoesNotContain(v2Pack.Files.Keys, path => path.EndsWith(".svg", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains("older released OTP Harbor builds support only format v1", v2.Stdout);
+        Assert.DoesNotContain("format v1 remains the compatibility default", v3.Stdout);
         Assert.True(fixture.Acquirer.LastOptions!.Offline);
         using var visualReport = System.Text.Json.JsonDocument.Parse(
             await File.ReadAllTextAsync(Path.ChangeExtension(v2Path, ".visual-report.json")));
@@ -108,6 +171,29 @@ public sealed class CliTests
             rightsReport.RootElement.GetProperty("brands").GetArrayLength());
         Assert.Equal(v2Pack.Document.Brands.Count,
             visualReport.RootElement.GetProperty("brands").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task VersionThreeCanBeSelectedExplicitlyAndProducesTwoVerifiedThemeAppearances()
+    {
+        using var fixture = new CliFixture();
+        var path = fixture.FilePath("format-v3.otphicons");
+
+        var result = await RunAsync([
+            "build", "--format-version", "3", "--offline", "--output", path, "--non-interactive"
+        ], fixture);
+
+        Assert.Equal(0, result.ExitCode);
+        var pack = await PackReader.ReadAndValidateAsync(path);
+        var brand = Assert.Single(pack.Document.Brands);
+        Assert.Equal(3, pack.Document.FormatVersion);
+        Assert.NotNull(brand.Appearances?.LightTheme);
+        Assert.NotNull(brand.Appearances?.DarkTheme);
+        using var visualReport = System.Text.Json.JsonDocument.Parse(
+            await File.ReadAllTextAsync(Path.ChangeExtension(path, ".visual-report.json")));
+        Assert.Equal(3, visualReport.RootElement.GetProperty("formatVersion").GetInt32());
+        Assert.Equal(2, visualReport.RootElement.GetProperty("totalAppearances").GetInt32());
+        Assert.Equal(0, visualReport.RootElement.GetProperty("unresolvedFailures").GetInt32());
     }
 
     [Fact]
@@ -133,7 +219,7 @@ public sealed class CliTests
 
     [Theory]
     [InlineData("0")]
-    [InlineData("3")]
+    [InlineData("4")]
     [InlineData("latest")]
     public async Task FormatVersionRejectsUnsupportedValues(string value)
     {
@@ -144,7 +230,7 @@ public sealed class CliTests
         ], fixture);
 
         Assert.Equal(3, result.ExitCode);
-        Assert.Contains("must be 1 or 2", result.Stderr);
+        Assert.Contains("must be 1, 2, or 3", result.Stderr);
         Assert.Equal(0, fixture.Acquirer.CallCount);
     }
 
@@ -159,7 +245,8 @@ public sealed class CliTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.True(File.Exists(outputPath));
-        Assert.Contains("sources pinned to this builder release", result.Stdout);
+        Assert.Contains("OTP Harbor Icon Pack Builder", result.Stdout);
+        Assert.DoesNotContain("sources pinned to this builder release", result.Stdout);
         Assert.Contains("Use this location? [Y/n]", result.Stdout);
         Assert.Contains("100.0%", result.Stdout);
         Assert.Contains("+ [====================]", result.Stdout);

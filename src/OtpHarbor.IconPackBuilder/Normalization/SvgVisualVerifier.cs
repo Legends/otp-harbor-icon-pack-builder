@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Xml.Linq;
 using SkiaSharp;
 using Svg.Skia;
 
@@ -13,6 +14,10 @@ public sealed record SvgVisualMetrics(
     IReadOnlyList<string> NormalizedPalette,
     bool Resolved);
 
+internal sealed record RuntimeVisualCapture(
+    SvgVisualMetrics SourceIdentity,
+    byte[] SourceRgba);
+
 internal static class SvgVisualVerifier
 {
     private const int TileSize = 40;
@@ -23,6 +28,7 @@ internal static class SvgVisualVerifier
     private const double MaximumMeanChannelDifference = 3.0;
     private const double MaximumMaterialPixelRatio = 0.03;
     private const int MaterialPixelRgbDifference = 96;
+    private const int CompositionProbeSize = 64;
 
     public static SvgVisualMetrics Compare(byte[] source, byte[] normalized, string backgroundColor)
     {
@@ -31,13 +37,46 @@ internal static class SvgVisualVerifier
         return CompareBitmaps(sourceBitmap, normalizedBitmap);
     }
 
+    public static byte[] RenderRuntimeRgba(byte[] sourceSvg, int contentInset)
+    {
+        using var bitmap = RenderContent(sourceSvg, RuntimeIconRenderer.Width,
+            SKColors.Transparent, contentInset);
+        var rgba = new byte[RuntimeIconRenderer.MaximumDecodedBytes];
+        var index = 0;
+        foreach (var pixel in bitmap.Pixels)
+        {
+            rgba[index++] = pixel.Red;
+            rgba[index++] = pixel.Green;
+            rgba[index++] = pixel.Blue;
+            rgba[index++] = pixel.Alpha;
+        }
+        return rgba;
+    }
+
+    public static RuntimeVisualCapture CaptureRuntimeRgba(
+        byte[] sourceSvg,
+        string backgroundColor,
+        int contentInset)
+    {
+        using var source = RenderContent(sourceSvg, RuntimeIconRenderer.Width,
+            SKColors.Transparent, contentInset);
+        if (!HasVisiblePixel(source))
+            throw new InputValidationException("Runtime visual capture produced blank source artwork.");
+        using var sourceTile = CompositeRuntimeTile(source, backgroundColor);
+        return new RuntimeVisualCapture(
+            CompareBitmaps(sourceTile, sourceTile),
+            Rgba(source));
+    }
+
     public static SvgVisualMetrics CompareCanonicalToRuntimePng(
         byte[] canonicalSvg,
         byte[] runtimePng,
-        string backgroundColor)
+        string backgroundColor,
+        int contentInset = 0)
     {
         var profiledSvg = RuntimeIconRenderer.ApplyRuntimePaintProfile(canonicalSvg);
-        using var canonical = RenderContent(profiledSvg, RuntimeIconRenderer.Width, SKColors.Transparent);
+        using var canonical = RenderContent(profiledSvg, RuntimeIconRenderer.Width,
+            SKColors.Transparent, contentInset);
         using var runtime = DeterministicPng.DecodeAndValidate(runtimePng,
             RuntimeIconRenderer.Width, RuntimeIconRenderer.Height, "runtime visual verification");
         if (!HasVisiblePixel(canonical) || !HasVisiblePixel(runtime))
@@ -50,12 +89,86 @@ internal static class SvgVisualVerifier
         return alphaMismatch ? metrics with { Resolved = false } : metrics;
     }
 
+    public static SvgVisualMetrics CompareSourceToRuntimePng(
+        byte[] sourceSvg,
+        byte[] runtimePng,
+        string backgroundColor,
+        int contentInset)
+    {
+        using var source = RenderContent(sourceSvg, RuntimeIconRenderer.Width,
+            SKColors.Transparent, contentInset);
+        using var runtime = DeterministicPng.DecodeAndValidate(runtimePng,
+            RuntimeIconRenderer.Width, RuntimeIconRenderer.Height, "source-to-runtime visual verification");
+        if (!HasVisiblePixel(source) || !HasVisiblePixel(runtime))
+            return new SvgVisualMetrics(double.MaxValue, TileSize * TileSize, TileSize * TileSize,
+                [], [], false);
+        using var sourceTile = CompositeRuntimeTile(source, backgroundColor);
+        using var runtimeTile = CompositeRuntimeTile(runtime, backgroundColor);
+        return CompareBitmaps(sourceTile, runtimeTile);
+    }
+
+    public static SvgVisualMetrics CompareExpectedRgbaToRuntimePng(
+        byte[] expectedRgba,
+        byte[] runtimePng,
+        string backgroundColor)
+    {
+        using var runtime = DeterministicPng.DecodeAndValidate(runtimePng,
+            RuntimeIconRenderer.Width, RuntimeIconRenderer.Height, "runtime pixel verification");
+        return CompareExpectedRgbaToRuntimeBitmap(expectedRgba, runtime, backgroundColor);
+    }
+
+    public static SvgVisualMetrics CompareExpectedRgbaToRuntimeBitmap(
+        byte[] expectedRgba,
+        SKBitmap runtime,
+        string backgroundColor)
+    {
+        if (expectedRgba.Length != RuntimeIconRenderer.MaximumDecodedBytes)
+            throw new ArgumentException("Expected runtime RGBA has an invalid byte length.", nameof(expectedRgba));
+        var offset = 0;
+        var exact = true;
+        foreach (var pixel in runtime.Pixels)
+        {
+            exact &= pixel.Red == expectedRgba[offset]
+                && pixel.Green == expectedRgba[offset + 1]
+                && pixel.Blue == expectedRgba[offset + 2]
+                && pixel.Alpha == expectedRgba[offset + 3];
+            offset += 4;
+        }
+        if (!exact || !HasVisiblePixel(runtime))
+            return new SvgVisualMetrics(double.MaxValue, TileSize * TileSize, TileSize * TileSize,
+                [], [], false);
+        using var runtimeTile = CompositeRuntimeTile(runtime, backgroundColor);
+        return CompareBitmaps(runtimeTile, runtimeTile);
+    }
+
+    public static SvgVisualMetrics CompareCanonicalToReviewedBadgeRuntimePng(
+        byte[] canonicalSvg,
+        byte[] runtimePng,
+        string matteColor,
+        string previewBackgroundColor)
+    {
+        using var expected = RuntimeIconRenderer.CreateReviewedBadgeBitmap(
+            canonicalSvg, matteColor, "reviewed badge visual verification");
+        using var runtime = DeterministicPng.DecodeAndValidate(runtimePng,
+            RuntimeIconRenderer.Width, RuntimeIconRenderer.Height, "reviewed badge runtime visual verification");
+        if (!HasVisiblePixel(expected) || !HasVisiblePixel(runtime))
+            return new SvgVisualMetrics(double.MaxValue, TileSize * TileSize, TileSize * TileSize,
+                [], [], false);
+        var alphaMismatch = !AlphaPixelsMatch(expected, runtime);
+        using var expectedTile = CompositeRuntimeTile(expected, previewBackgroundColor);
+        using var runtimeTile = CompositeRuntimeTile(runtime, previewBackgroundColor);
+        var metrics = CompareBitmaps(expectedTile, runtimeTile);
+        return alphaMismatch ? metrics with { Resolved = false } : metrics;
+    }
+
     private static SvgVisualMetrics CompareBitmaps(SKBitmap sourceBitmap, SKBitmap normalizedBitmap)
     {
         long totalDifference = 0;
         var materiallyDifferent = 0;
-        for (var y = 0; y < TileSize; y++)
-            for (var x = 0; x < TileSize; x++)
+        if (sourceBitmap.Width != normalizedBitmap.Width || sourceBitmap.Height != normalizedBitmap.Height)
+            throw new ArgumentException("Visual comparison bitmaps must have equal dimensions.");
+        for (var y = 0; y < sourceBitmap.Height; y++)
+            for (var x = 0; x < sourceBitmap.Width; x++)
             {
                 var sourcePixel = sourceBitmap.GetPixel(x, y);
                 var normalizedPixel = normalizedBitmap.GetPixel(x, y);
@@ -65,7 +178,7 @@ internal static class SvgVisualVerifier
                 totalDifference += difference;
                 if (difference > MaterialPixelRgbDifference) materiallyDifferent++;
             }
-        var totalPixels = TileSize * TileSize;
+        var totalPixels = checked(sourceBitmap.Width * sourceBitmap.Height);
         var mean = totalDifference / (double)(totalPixels * 3);
         return new SvgVisualMetrics(
             Math.Round(mean, 4),
@@ -77,9 +190,66 @@ internal static class SvgVisualVerifier
                 && materiallyDifferent <= totalPixels * MaximumMaterialPixelRatio);
     }
 
-    public static byte[] RasterFlatten(byte[] source, string backgroundColor, int rasterSize)
+    public static bool RecognizesEmbeddedComposition(byte[] canonicalSvg)
     {
-        if (rasterSize < ContentSize || rasterSize % ContentSize != 0)
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(Encoding.UTF8.GetString(canonicalSvg), LoadOptions.None);
+        }
+        catch
+        {
+            return false;
+        }
+        var root = document.Root;
+        if (root is null) return false;
+        var paths = root.Elements().Where(element => element.Name.LocalName == "path").ToArray();
+        if (paths.Length < 2) return false;
+        var viewBox = root.Attribute("viewBox")?.Value;
+        if (string.IsNullOrWhiteSpace(viewBox)) return false;
+
+        using var complete = RenderContent(canonicalSvg, CompositionProbeSize, SKColors.Transparent);
+        var bounds = VisibleBounds(complete);
+        if (bounds is null) return false;
+        var boundsArea = checked((bounds.Value.Right - bounds.Value.Left + 1)
+            * (bounds.Value.Bottom - bounds.Value.Top + 1));
+
+        for (var candidateIndex = 0; candidateIndex < paths.Length - 1; candidateIndex++)
+        {
+            var candidateFill = SolidFill(paths[candidateIndex]);
+            if (candidateFill is null) continue;
+            var details = paths[(candidateIndex + 1)..]
+                .Where(path => SolidFill(path) is { } fill
+                    && !fill.Equals(candidateFill, StringComparison.Ordinal))
+                .ToArray();
+            if (details.Length == 0) continue;
+
+            using var candidate = RenderCanonicalSubset(root, [paths[candidateIndex]]);
+            var candidatePixels = candidate.Pixels.Count(pixel => pixel.Alpha >= 240);
+            if (candidatePixels < boundsArea * 0.50) continue;
+
+            using var detail = RenderCanonicalSubset(root, details);
+            var detailPixels = 0;
+            var containedDetailPixels = 0;
+            for (var y = 0; y < CompositionProbeSize; y++)
+                for (var x = 0; x < CompositionProbeSize; x++)
+                {
+                    if (detail.GetPixel(x, y).Alpha < 64) continue;
+                    detailPixels++;
+                    if (candidate.GetPixel(x, y).Alpha >= 64) containedDetailPixels++;
+                }
+            if (detailPixels >= 16 && containedDetailPixels >= detailPixels * 0.75)
+                return true;
+        }
+        return false;
+    }
+
+    public static byte[] RasterFlatten(
+        byte[] source,
+        string backgroundColor,
+        int rasterSize)
+    {
+        if (rasterSize < ContentSize || rasterSize > RuntimeIconRenderer.Width)
             throw new ArgumentOutOfRangeException(nameof(rasterSize));
         var background = ParseColor(backgroundColor);
         var backgroundRgb = ((uint)background.Red << 16) | ((uint)background.Green << 8) | background.Blue;
@@ -121,6 +291,39 @@ internal static class SvgVisualVerifier
         return Encoding.UTF8.GetBytes(output.ToString());
     }
 
+    private static SKBitmap RenderCanonicalSubset(XElement root, IReadOnlyList<XElement> paths)
+    {
+        var subset = new XElement(root.Name,
+            root.Attributes().Where(attribute => attribute.Name.LocalName == "viewBox"),
+            paths.Select(path => new XElement(path)));
+        var bytes = Encoding.UTF8.GetBytes(new XDocument(subset).ToString(SaveOptions.DisableFormatting));
+        return RenderContent(bytes, CompositionProbeSize, SKColors.Transparent);
+    }
+
+    private static string? SolidFill(XElement path)
+    {
+        var fill = path.Attribute("fill")?.Value.ToUpperInvariant();
+        return fill is { Length: 7 } && fill[0] == '#' ? fill : null;
+    }
+
+    private static (int Left, int Top, int Right, int Bottom)? VisibleBounds(SKBitmap bitmap)
+    {
+        var left = bitmap.Width;
+        var top = bitmap.Height;
+        var right = -1;
+        var bottom = -1;
+        for (var y = 0; y < bitmap.Height; y++)
+            for (var x = 0; x < bitmap.Width; x++)
+                if (bitmap.GetPixel(x, y).Alpha >= 64)
+                {
+                    left = Math.Min(left, x);
+                    top = Math.Min(top, y);
+                    right = Math.Max(right, x);
+                    bottom = Math.Max(bottom, y);
+                }
+        return right < left ? null : (left, top, right, bottom);
+    }
+
     private static SKBitmap RenderTile(byte[] svg, string backgroundColor)
     {
         var bitmap = new SKBitmap(TileSize, TileSize, SKColorType.Rgba8888, SKAlphaType.Unpremul);
@@ -131,12 +334,15 @@ internal static class SvgVisualVerifier
         return bitmap;
     }
 
-    private static SKBitmap RenderContent(byte[] svg, int size, SKColor background)
+    private static SKBitmap RenderContent(byte[] svg, int size, SKColor background, int contentInset = 0)
     {
+        if (contentInset < 0 || contentInset * 2 >= size)
+            throw new ArgumentOutOfRangeException(nameof(contentInset));
         var bitmap = new SKBitmap(size, size, SKColorType.Rgba8888, SKAlphaType.Unpremul);
         using var canvas = new SKCanvas(bitmap);
         canvas.Clear(background);
-        Draw(svg, canvas, new SKRect(0, 0, size, size));
+        Draw(svg, canvas, new SKRect(contentInset, contentInset,
+            size - contentInset, size - contentInset));
         canvas.Flush();
         return bitmap;
     }
@@ -159,6 +365,20 @@ internal static class SvgVisualVerifier
         foreach (var pixel in bitmap.Pixels)
             if (pixel.Alpha != 0) return true;
         return false;
+    }
+
+    private static byte[] Rgba(SKBitmap bitmap)
+    {
+        var rgba = new byte[checked(bitmap.Width * bitmap.Height * 4)];
+        var offset = 0;
+        foreach (var pixel in bitmap.Pixels)
+        {
+            rgba[offset++] = pixel.Red;
+            rgba[offset++] = pixel.Green;
+            rgba[offset++] = pixel.Blue;
+            rgba[offset++] = pixel.Alpha;
+        }
+        return rgba;
     }
 
     private static bool AlphaPixelsMatch(SKBitmap left, SKBitmap right)

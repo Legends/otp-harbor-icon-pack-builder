@@ -27,6 +27,17 @@ licenses/
   ...
 ```
 
+Format 3 is also PNG-only and stores content-addressed theme appearances:
+
+```text
+pack.json
+runtime/
+  appearance-128/
+    <lowercase-png-sha256>.png
+licenses/
+  ...
+```
+
 There is exactly one root `pack.json`. Every icon and license reference is a container-relative path. Importers must reject absolute paths, traversal segments, backslashes, duplicate normalized paths, unreferenced files, and entries outside the documented roots.
 
 ## Manifest
@@ -48,6 +59,8 @@ The frozen format-1 machine-readable definition is
 [`../schemas/otp-harbor-icon-pack.schema.json`](../schemas/otp-harbor-icon-pack.schema.json).
 The separate format-2 definition is
 [`../schemas/otp-harbor-icon-pack-v2.schema.json`](../schemas/otp-harbor-icon-pack-v2.schema.json).
+The separate format-3 definition is
+[`../schemas/otp-harbor-icon-pack-v3.schema.json`](../schemas/otp-harbor-icon-pack-v3.schema.json).
 
 ### Sources
 
@@ -143,6 +156,59 @@ has exactly one referenced runtime PNG and every PNG has exactly one brand.
 The `icon` member is forbidden even when null, and no SVG may occur in the v2
 archive. A v1 archive must contain neither `runtimeIcon` nor `runtime/` files.
 
+### Format 3 themed brand
+
+Format 3 removes the legacy per-brand `icon`, `backgroundColor`, and
+`runtimeIcon` members. Every brand contains two fully resolved appearances:
+
+```json
+{
+  "id": "example",
+  "displayName": "Example",
+  "issuerAliases": ["Example"],
+  "selectedSource": { "provider": "dashboard-icons", "sourceId": "example", "metadata": {} },
+  "sources": [],
+  "appearances": {
+    "lightTheme": {
+      "asset": {
+        "path": "runtime/appearance-128/<sha256>.png",
+        "mediaType": "image/png",
+        "width": 128,
+        "height": 128,
+        "sha256": "<sha256>",
+        "renderProfile": "otp-harbor-themed-appearance-v1"
+      },
+      "assetRole": "foreground",
+      "background": { "mode": "solid", "color": "#FFFFFF" },
+      "selection": "native-theme-variant",
+      "source": { "provider": "dashboard-icons", "sourceId": "example-dark", "assetPath": "svg/example-dark.svg" },
+      "appearanceSelectionReason": "Selected provider-supplied lightTheme artwork after normalization and visual verification."
+    },
+    "darkTheme": {}
+  }
+}
+```
+
+The abbreviated `darkTheme` above has the same required shape as
+`lightTheme`; the schema does not permit an empty appearance.
+
+`assetRole` is normative. `foreground` means the PNG is transparent logo
+artwork and requires a `solid` tile background. `complete-icon` means the PNG
+already contains its intended composition and requires `background.mode` of
+`embedded` with no color. Consumers must not draw a second branded background
+behind a complete icon.
+
+The asset path is exactly
+`runtime/appearance-128/<lowercase-sha256>.png`, and the filename hash must
+equal both the descriptor SHA-256 and the packaged bytes. Light and dark
+appearances may reference the same path. Sharing is required when the rendered
+bytes are identical and is allowed across brands. Every PNG must be referenced;
+there is no one-file-per-brand rule in v3.
+
+`selection`, `source`, and `appearanceSelectionReason` make the builder's
+theme-specific decision auditable. Provider conventions are resolved by the
+builder and must not be reinterpreted by consumers.
+
 ### Issuer alias index
 
 `issuerAliases` is the deterministic lookup index:
@@ -160,7 +226,7 @@ Normalization performs Unicode compatibility normalization, invariant case foldi
 
 ## Normalized SVG profile
 
-Every format-1 packaged SVG and every format-2 internal canonical reference:
+Every format-1 packaged SVG and every format-2 or format-3 internal canonical reference:
 
 - is well-formed XML with one `svg` root;
 - has a finite, positive `viewBox`;
@@ -171,7 +237,7 @@ Every format-1 packaged SVG and every format-2 internal canonical reference:
 - has passed the builder's source-versus-output visual comparison.
 
 Format-1 importers must treat every SVG as untrusted data and apply bounded
-parsing and path validation. Format-2 consumers never receive or parse SVG;
+parsing and path validation. Format-2 and format-3 consumers never receive or parse SVG;
 the builder discards its internal canonical references before packaging.
 
 ## Runtime foreground profile `otp-harbor-foreground-v1`
@@ -226,6 +292,86 @@ untrusted and perform their own bounded validation. After one successful full
 PNG decode during staged import, installation may stream the validated bytes
 without a second decode while recomputing and checking SHA-256.
 
+## Themed appearance profile `otp-harbor-themed-appearance-v1`
+
+This section is normative for format 3. It inherits the format-2 PNG encoding,
+dimension, fitting, safety, bounded-decoding, deterministic-ZIP, blank-output,
+and visual-comparison rules. Its additional rules are:
+
+- the builder resolves both `lightTheme` and `darkTheme` before packaging;
+- visible geometry is uniformly fitted into the centered 112 by 112 safe
+  content area from pixel 8 through pixel 119 on each axis. The surrounding
+  eight-pixel transparent inset prevents wide marks and wordmarks from touching
+  the tile edge; at a 24-logical-pixel presentation it represents a 1.5-pixel
+  margin. Format-1 and format-2 fitting remain frozen and unchanged;
+- original multicolor paint and layer order are preserved; multicolor artwork
+  is never automatically inverted or recolored for a theme;
+- a Simple Icons primary brand color is foreground paint, not an inferred tile
+  background;
+- when that materialized monochrome brand mark has at least 1.25:1 contrast for
+  at least 90 percent of its nearly opaque pixels against the application theme
+  surface, it is a transparent `complete-icon` with `embedded` background mode;
+  otherwise it remains `foreground` artwork with a deterministic contrasting
+  solid tile. This rule changes presentation only and never recolors the mark;
+- a provider-supplied Dashboard light/dark asset may be selected only for its
+  intended appearance and only after the same normalization and visual gates
+  as a default asset;
+- recognized Aegis variations remain associated with their primary record for
+  provenance, but are not selected automatically without an explicit reviewed
+  mapping because they do not encode an authoritative theme contract;
+- Dashboard's dark artwork variant is evaluated for `lightTheme`, and its light
+  artwork variant is evaluated for `darkTheme`; these names describe the
+  artwork, not the application theme;
+- source artwork with a recognized embedded composition is retained as a
+  `complete-icon`; otherwise the result is a transparent `foreground` with a
+  deterministic contrast-checked solid background. Recognition requires a
+  large solid source-painted backplate that geometrically contains a later,
+  contrasting detail layer; adjacent multicolor marks and transparent holes
+  alone do not qualify. The source paint and geometry are preserved, so this
+  classification never invents a generic white tile;
+- a reviewed badge composition may convert only an explicitly mapped
+  provider/source record into a `complete-icon`. The deterministic operation
+  applies its declared matte color only to fully enclosed transparent regions,
+  retains boundary-connected transparency and antialiased exterior edges, and
+  records `reviewed-badge-composition` as the selection reason. It is never
+  inferred merely because paths contain enclosed transparent regions;
+- an unpaired/default foreground that still needs a tile uses a neutral white
+  tile in both application themes. A dark tile is used only with
+  provider-supplied artwork explicitly intended for the dark application theme.
+  This preserves source paint instead of automatically recoloring it;
+- a reviewed `source-overrides.json` entry may declare light/dark foreground
+  colors for one exact canonical brand and provider/source record when the
+  source supports those monochrome treatments. The entry requires a rationale,
+  preserves transparent exterior pixels, emits the existing
+  `brand-color-foreground` selection, and cannot affect v1/v2. This is an
+  explicit review boundary, not a general inversion or recoloring heuristic;
+- foreground/background paint collisions below the 1.1:1 visibility boundary
+  are rejected or resolved by selecting a deterministic neutral background;
+- the two appearances are rendered independently, then identical PNG bytes are
+  deduplicated by lowercase SHA-256;
+- after static source safety validation and canonical structural normalization,
+  format 3 materializes the selected appearance's inherited paint and renders
+  that validated source exactly once at the final 128-pixel/inset geometry. The
+  exact bounded RGBA buffer is deterministically encoded, reopened, and compared
+  byte-for-pixel with the packaged PNG. The normalized SVG remains the bounded
+  internal geometry/color/background audit artifact and is never packaged. This
+  avoids both repeated catalog rendering and any 24-to-128 raster upscale;
+- each appearance is compared on a 40 by 40 preview tile with a centered 24 by
+  24 content square. Complete icons use the theme preview surface only for
+  verification; it is not added to the PNG.
+
+The 128-pixel raster remains the single v3 asset size because it covers the
+current 24–26 logical-pixel UI use at modern Android densities while keeping
+the pack and bitmap cache bounded. A later larger-size profile requires a new
+profile identifier and measurements; consumers must not upscale the contract
+silently.
+
+The source-controlled `mappings/appearance-compositions.json` file is the
+review boundary for composed badges. Each entry identifies the canonical
+brand, exact provider/source record, supported composition mode, matte color,
+and review rationale. See the
+[Simple Icons badge-composition audit](SIMPLE-ICONS-BADGE-COMPOSITION-AUDIT.md).
+
 ## Visual report
 
 A successful build also writes a sibling diagnostic file:
@@ -238,7 +384,9 @@ otp-harbor-icons.visual-report.json
 The visual report contains per-brand palettes, operations, and pixel-comparison
 metrics. For v1 it reports source-to-packaged-canonical-SVG verification. For
 v2 it records the operation from the selected source through the internal
-canonical reference to the final packaged PNG; no packaged SVG is implied.
+canonical reference to the final packaged PNG. For v3 it contains exactly two
+appearance entries per brand, including role and selection reason. No packaged
+SVG is implied for either PNG-only format.
 Its `formatVersion` equals the format version of the pack produced by the same
 transaction.
 It is not an archive member or import input. A successful catalog has
@@ -276,9 +424,23 @@ A compatible importer should reject the complete archive without changing previo
   lacks its runtime asset;
 - a v2 brand uses a noncanonical runtime path/profile/media type/dimension, has
   an invalid/blank/covered PNG, or declares the wrong runtime SHA-256;
-- brand and runtime-PNG coverage is not one-to-one.
+- v2 brand and runtime-PNG coverage is not one-to-one;
+- a v3 manifest contains a legacy `icon`, top-level `backgroundColor`, or
+  `runtimeIcon`, or its archive contains an SVG;
+- a v3 brand lacks either theme appearance, has inconsistent
+  role/background semantics, has invalid appearance provenance, or references
+  a non-content-addressed, missing, structurally invalid, or hash-mismatched
+  PNG;
+- a v3 archive contains an unreferenced asset. Multiple v3 appearance
+  descriptors may intentionally reference one identical content-addressed PNG.
 
 Validation and installation should be transactional: fully stage and validate the new pack before replacing any prior pack.
+
+Blank/covered output and the other semantic pixel checks are mandatory builder
+publication gates, not catalog-wide consumer import work. A consumer validates
+all hashes and bounded PNG container structure transactionally, then decodes
+assets lazily outside the UI thread. It need not inflate the entire catalog at
+import merely to repeat the builder's visual analysis.
 
 ## Licensing and provenance
 
@@ -298,8 +460,11 @@ as its selected source; it is not a separately sourced work.
 
 ## Format evolution
 
-Format 1 is frozen and remains the builder default until the OTP Harbor
-consumer deliberately ships v2 support. Format 2 must be selected explicitly
-with `--format-version 2`. Importers must dispatch on `formatVersion` and reject
-unknown versions rather than partially interpreting them. Neither reader may
-ignore unknown manifest members or unreferenced files.
+Formats 1 and 2 are frozen and remain explicitly selectable with
+`--format-version 1` and `--format-version 2`. Format 3 is the builder default
+and may also be selected explicitly with `--format-version 3`. Importers must
+dispatch on `formatVersion` and reject unknown versions rather than partially
+interpreting them. No reader may ignore unknown manifest members or
+unreferenced files. See the
+[format v3 consumer handoff](FORMAT-V3-CONSUMER-HANDOFF.md) before coordinating
+a consumer release.

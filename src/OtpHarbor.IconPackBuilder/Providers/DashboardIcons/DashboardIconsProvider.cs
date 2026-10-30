@@ -43,14 +43,13 @@ public sealed class DashboardIconsProvider(ArchiveLimits? limits = null) : IIcon
             if (item.ValueKind != JsonValueKind.Object)
                 throw new InputValidationException($"dashboard-icons: record '{slug}' must be an object.");
             var baseFormat = OptionalString(item, "base");
-            var relativeAsset = $"svg/{slug}.svg";
-            string assetPath;
-            try { assetPath = archive.ResolveRelative(metadataPath, relativeAsset); }
-            catch (InputValidationException) when (!string.Equals(baseFormat, "svg", StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(baseFormat, "svg", StringComparison.OrdinalIgnoreCase))
             {
                 skipped++;
                 continue;
             }
+            var relativeAsset = $"svg/{slug}.svg";
+            var assetPath = archive.ResolveRelative(metadataPath, relativeAsset);
             var svg = await archive.ReadAsync(assetPath, _limits.MaxSvgBytes, cancellationToken);
             var backgroundColor = ProviderHelpers.ValidateSvg(svg, Id, assetPath, _limits.MaxSvgBytes);
             var aliases = new List<string> { ProviderHelpers.HumanizeSlug(slug) };
@@ -67,6 +66,12 @@ public sealed class DashboardIconsProvider(ArchiveLimits? limits = null) : IIcon
                 light = OptionalString(colors, "light");
                 dark = OptionalString(colors, "dark");
             }
+            var variants = new List<SourceAssetVariant>();
+            // Dashboard's light/dark suffix describes the artwork color. A dark
+            // artwork variant is intended for a light application surface and
+            // a light artwork variant is intended for a dark application surface.
+            await AddVariantAsync(slug, dark, "light-theme", variants);
+            await AddVariantAsync(slug, light, "dark-theme", variants);
             string? updatedAt = null;
             string? author = null;
             if (item.TryGetProperty("update", out var update) && update.ValueKind == JsonValueKind.Object)
@@ -102,7 +107,7 @@ public sealed class DashboardIconsProvider(ArchiveLimits? limits = null) : IIcon
                     ["nativeBrandColor"] = nativeColor,
                     ["sourceUrl"] = OptionalString(item, "source"),
                     ["updatedAt"] = updatedAt
-                }));
+                }, Variants: variants));
             if (records.Count > 5_000)
                 throw new InputValidationException("dashboard-icons: metadata contains more than 5,000 usable SVG records.");
         }
@@ -112,6 +117,28 @@ public sealed class DashboardIconsProvider(ArchiveLimits? limits = null) : IIcon
             catalogMetadata, records,
             ProviderHelpers.ReadLicenses(archive, cancellationToken), skipped,
             input.Version, input.Revision, input.SourceUrl);
+
+        async Task AddVariantAsync(
+            string ownerSourceId,
+            string? variantSourceId,
+            string kind,
+            ICollection<SourceAssetVariant> target)
+        {
+            if (string.IsNullOrWhiteSpace(variantSourceId)) return;
+            if (variantSourceId.Equals(ownerSourceId, StringComparison.Ordinal)) return;
+            if (!ProviderHelpers.IsSafeDisplayText(variantSourceId, 256))
+                throw new InputValidationException($"dashboard-icons: record '{ownerSourceId}' contains an invalid {kind} variant identifier.");
+            var relativeVariantPath = $"svg/{variantSourceId}.svg";
+            string variantPath;
+            try { variantPath = archive.ResolveRelative(metadataPath, relativeVariantPath); }
+            catch (InputValidationException ex) when (ex.Message.Contains("Missing referenced icon file", StringComparison.Ordinal))
+            {
+                return;
+            }
+            var variantSvg = await archive.ReadAsync(variantPath, _limits.MaxSvgBytes, cancellationToken);
+            ProviderHelpers.ValidateSvg(variantSvg, Id, variantPath, _limits.MaxSvgBytes);
+            target.Add(new SourceAssetVariant(variantSourceId, variantPath, variantSvg, kind));
+        }
     }
 
     private static int ReadAcquisitionSkippedCount(JsonElement metadata)

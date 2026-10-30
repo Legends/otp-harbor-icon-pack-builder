@@ -1,3 +1,6 @@
+using System.Runtime.ExceptionServices;
+using System.Security.Cryptography;
+using System.Text;
 using OtpHarbor.IconPackBuilder.Normalization;
 using OtpHarbor.IconPackBuilder.Providers;
 
@@ -7,7 +10,7 @@ public sealed record CatalogBuildProgress(int CompletedBrands, int TotalBrands, 
 
 public sealed class BrandMerger
 {
-    public static readonly IReadOnlyList<string> DefaultProviderPreference = ["aegis", "dashboard-icons", "simple-icons"];
+    public static readonly IReadOnlyList<string> DefaultProviderPreference = ["dashboard-icons", "aegis", "simple-icons"];
 
     public PackBuildResult Merge(
         IReadOnlyList<ProviderCatalog> catalogs,
@@ -18,10 +21,11 @@ public sealed class BrandMerger
         Action<CatalogBuildProgress>? progress = null,
         RightsPolicy rightsPolicy = RightsPolicy.Preserve,
         int formatVersion = 1,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int? maxDegreeOfParallelism = null)
     {
         if (catalogs.Count == 0) throw new InputValidationException("At least one provider input is required.");
-        if (formatVersion is not (1 or 2))
+        if (formatVersion is not (1 or 2 or 3))
             throw new InputValidationException($"Unsupported output format version {formatVersion}.");
         providerPreference ??= DefaultProviderPreference;
         var sourceMappings = mappings.CanonicalBrands.SelectMany(brand => brand.Matches.Select(match => (brand, match)))
@@ -89,6 +93,13 @@ public sealed class BrandMerger
 
         if (conflicts.Count > 0) throw new BuildConflictException(conflicts);
 
+        var orderedGroups = groups.Values.ToArray();
+        var themedSelections = formatVersion == 3
+            ? PreselectThemeAppearances(orderedGroups, effectiveSourceOverrides,
+                mappings.EffectiveAppearanceCompositions, providerPreference, progress,
+                maxDegreeOfParallelism, cancellationToken)
+            : null;
+
         var pendingBrands = new List<PendingBrand>();
         var icons = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
         var runtimeIcons = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
@@ -97,21 +108,36 @@ public sealed class BrandMerger
         var rightsCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
         var rightsAssessments = new List<RightsAssessmentEntry>();
         var visualVerification = new List<VisualVerificationEntry>();
+        var runtimeVisualReferences = new List<RuntimeVisualReference>();
         var completedBrands = 0;
 
-        foreach (var group in groups.Values)
+        for (var groupIndex = 0; groupIndex < orderedGroups.Length; groupIndex++)
         {
+            var group = orderedGroups[groupIndex];
             cancellationToken.ThrowIfCancellationRequested();
-            progress?.Invoke(new CatalogBuildProgress(completedBrands, groups.Count, group.Id));
-            var selected = SelectSource(group, effectiveSourceOverrides, providerPreference,
-                formatVersion, cancellationToken);
-            var selectedRights = RightsAssessor.Assess(selected.Record, mappings.EffectiveRightsOverrides);
+            if (formatVersion != 3)
+                progress?.Invoke(new CatalogBuildProgress(completedBrands, groups.Count, group.Id));
+            var themed = formatVersion == 3
+                ? themedSelections![groupIndex]
+                : null;
+            var selected = themed is null
+                ? SelectSource(group, effectiveSourceOverrides, providerPreference, formatVersion, cancellationToken)
+                : null;
+            var selectedRecord = themed?.Record ?? selected!.Record;
+            var selectedRights = RightsAssessor.Assess(selectedRecord, mappings.EffectiveRightsOverrides);
             if (rightsPolicy == RightsPolicy.RequireDocumented && !RightsAssessor.IsDocumented(selectedRights))
-                throw new InputValidationException($"Brand '{group.Id}' selected '{selected.Record.Provider}/{selected.Record.SourceId}' with rights status '{RightsAssessor.ToMetadataValue(selectedRights.Status)}'. Add reviewed evidence in rights-assessments.json, choose another source, or use --rights-policy preserve.");
+                throw new InputValidationException($"Brand '{group.Id}' selected '{selectedRecord.Provider}/{selectedRecord.SourceId}' with rights status '{RightsAssessor.ToMetadataValue(selectedRights.Status)}'. Add reviewed evidence in rights-assessments.json, choose another source, or use --rights-policy preserve.");
             var iconPath = $"icons/{group.Id}.svg";
-            icons.Add(iconPath, selected.Normalized.Svg);
+            if (selected is not null) icons.Add(iconPath, selected.Normalized.Svg);
             RuntimeIcon? runtimeIcon = null;
-            if (selected.Runtime is not null)
+            ThemeAppearances? appearances = null;
+            if (themed is not null)
+            {
+                var light = AddThemeAsset(themed.LightTheme);
+                var dark = AddThemeAsset(themed.DarkTheme);
+                appearances = new ThemeAppearances(light, dark);
+            }
+            else if (selected!.Runtime is not null)
             {
                 var runtimePath = $"runtime/foreground-128/{group.Id}.png";
                 runtimeIcons.Add(runtimePath, selected.Runtime.Png);
@@ -119,11 +145,11 @@ public sealed class BrandMerger
                     RuntimeIconRenderer.Width, RuntimeIconRenderer.Height,
                     selected.Runtime.Sha256, RuntimeIconRenderer.RenderProfile);
             }
-            selectedCounts[selected.Record.Provider] = selectedCounts.GetValueOrDefault(selected.Record.Provider) + 1;
+            selectedCounts[selectedRecord.Provider] = selectedCounts.GetValueOrDefault(selectedRecord.Provider) + 1;
             var rightsStatus = RightsAssessor.ToMetadataValue(selectedRights.Status);
             rightsCounts[rightsStatus] = rightsCounts.GetValueOrDefault(rightsStatus) + 1;
-            rightsAssessments.Add(new RightsAssessmentEntry(group.Id, selected.Record.Provider,
-                selected.Record.SourceId, selectedRights.Status, selectedRights.Basis,
+            rightsAssessments.Add(new RightsAssessmentEntry(group.Id, selectedRecord.Provider,
+                selectedRecord.SourceId, selectedRights.Status, selectedRights.Basis,
                 selectedRights.LicenseType, selectedRights.EvidenceUrl, selectedRights.Note));
 
             foreach (var candidate in BuildAliasCandidates(group, mappings.IssuerAliases.GetValueOrDefault(group.Id)))
@@ -139,34 +165,74 @@ public sealed class BrandMerger
                     SortedMetadata(WithRightsMetadata(x.Metadata,
                         RightsAssessor.Assess(x, mappings.EffectiveRightsOverrides)))))
                 .ToArray();
-            var selectedMetadata = selected.Record.Metadata.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
+            var selectedMetadata = selectedRecord.Metadata.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
             AddRightsMetadata(selectedMetadata, selectedRights);
-            selectedMetadata["visualNormalization"] = selected.Normalized.Operations.Count == 0
-                ? "canonical-pass-through"
-                : string.Join(',', selected.Normalized.Operations);
-            selectedMetadata["normalizedForegroundColorCount"] = selected.Normalized.ForegroundColors.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            pendingBrands.Add(new PendingBrand(group.Id, group.DisplayName, selected.Normalized.BackgroundColor, iconPath,
-                new SelectedSource(selected.Record.Provider, selected.Record.SourceId, SortedMetadata(selectedMetadata)),
-                sourceReferences, runtimeIcon));
-            var metrics = selected.Runtime?.VisualMetrics ?? selected.Normalized.VisualMetrics;
-            var operations = selected.Runtime is null
-                ? selected.Normalized.Operations
-                : selected.Normalized.Operations.Append("rendered-runtime-foreground-v1").ToArray();
-            visualVerification.Add(new VisualVerificationEntry(
-                group.Id,
-                selected.Record.Provider,
-                selected.Record.SourceId,
-                selected.Record.AssetPath,
-                selected.Normalized.BackgroundColor,
-                operations,
-                metrics.MeanAbsoluteChannelDifference,
-                metrics.MateriallyDifferentPixels,
-                metrics.TotalPixels,
-                metrics.SourcePalette,
-                metrics.NormalizedPalette,
-                metrics.Resolved));
+            if (themed is null)
+            {
+                selectedMetadata["visualNormalization"] = selected!.Normalized.Operations.Count == 0
+                    ? "canonical-pass-through"
+                    : string.Join(',', selected.Normalized.Operations);
+                selectedMetadata["normalizedForegroundColorCount"] = selected.Normalized.ForegroundColors.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                pendingBrands.Add(new PendingBrand(group.Id, group.DisplayName, selected.Normalized.BackgroundColor, iconPath,
+                    new SelectedSource(selectedRecord.Provider, selectedRecord.SourceId, SortedMetadata(selectedMetadata)),
+                    sourceReferences, runtimeIcon, null));
+                var metrics = selected.Runtime?.VisualMetrics ?? selected.Normalized.VisualMetrics;
+                var operations = selected.Runtime is null
+                    ? selected.Normalized.Operations
+                    : selected.Normalized.Operations.Append("rendered-runtime-foreground-v1").ToArray();
+                visualVerification.Add(new VisualVerificationEntry(
+                    group.Id, selectedRecord.Provider, selectedRecord.SourceId, selectedRecord.AssetPath,
+                    selected.Normalized.BackgroundColor, operations, metrics.MeanAbsoluteChannelDifference,
+                    metrics.MateriallyDifferentPixels, metrics.TotalPixels, metrics.SourcePalette,
+                    metrics.NormalizedPalette, metrics.Resolved));
+            }
+            else
+            {
+                selectedMetadata["appearanceSelection"] = "theme-specific-v1";
+                pendingBrands.Add(new PendingBrand(group.Id, group.DisplayName, null, iconPath,
+                    new SelectedSource(selectedRecord.Provider, selectedRecord.SourceId, SortedMetadata(selectedMetadata)),
+                    sourceReferences, null, appearances));
+                AddVisualEntry("lightTheme", themed.LightTheme);
+                AddVisualEntry("darkTheme", themed.DarkTheme);
+            }
             completedBrands++;
-            progress?.Invoke(new CatalogBuildProgress(completedBrands, groups.Count, group.Id));
+            if (formatVersion != 3)
+                progress?.Invoke(new CatalogBuildProgress(completedBrands, groups.Count, group.Id));
+
+            ThemeAppearance AddThemeAsset(ThemeAppearanceSelection appearance)
+            {
+                var path = $"runtime/appearance-128/{appearance.Runtime.Sha256}.png";
+                if (runtimeIcons.TryGetValue(path, out var existing)
+                    && !existing.AsSpan().SequenceEqual(appearance.Runtime.Png))
+                    throw new InputValidationException($"Runtime asset hash collision at '{path}'.");
+                runtimeIcons[path] = appearance.Runtime.Png;
+                runtimeVisualReferences.Add(new RuntimeVisualReference(group.Id, appearance.Theme, path,
+                    appearance.Runtime.Sha256, appearance.Normalized.Svg, appearance.PreviewBackgroundColor,
+                    appearance.CompositionMode, appearance.CompositionColor,
+                    appearance.VisualSourceSvg));
+                return new ThemeAppearance(
+                    new RuntimeIcon(path, RuntimeIconRenderer.MediaType, RuntimeIconRenderer.Width,
+                        RuntimeIconRenderer.Height, appearance.Runtime.Sha256, RuntimeIconRenderer.ThemeRenderProfile),
+                    appearance.AssetRole,
+                    appearance.AssetRole == "complete-icon"
+                        ? new AppearanceBackground("embedded")
+                        : new AppearanceBackground("solid", appearance.PreviewBackgroundColor),
+                    appearance.Selection,
+                    new AppearanceSource(appearance.Record.Provider, appearance.SourceId, appearance.AssetPath),
+                    appearance.Reason);
+            }
+
+            void AddVisualEntry(string name, ThemeAppearanceSelection appearance)
+            {
+                var metrics = appearance.Runtime.VisualMetrics;
+                visualVerification.Add(new VisualVerificationEntry(
+                    group.Id, appearance.Record.Provider, appearance.SourceId, appearance.AssetPath,
+                    appearance.PreviewBackgroundColor,
+                    appearance.Normalized.Operations.Append("rendered-runtime-themed-v1").ToArray(),
+                    metrics.MeanAbsoluteChannelDifference, metrics.MateriallyDifferentPixels, metrics.TotalPixels,
+                    metrics.SourcePalette, metrics.NormalizedPalette, metrics.Resolved,
+                    name, appearance.AssetRole, appearance.Reason));
+            }
         }
 
         var aliasResolution = ResolveAliases(aliasCandidates, pendingBrands.Select(x => x.Id));
@@ -179,7 +245,8 @@ public sealed class BrandMerger
                 aliasResolution.AliasesByBrand[brand.Id],
                 brand.SelectedSource,
                 brand.Sources,
-                brand.RuntimeIcon))
+                brand.RuntimeIcon,
+                brand.Appearances))
             .OrderBy(x => x.Id, StringComparer.Ordinal)
             .ToArray();
         var issuerAliases = aliasResolution.Index;
@@ -225,7 +292,62 @@ public sealed class BrandMerger
         return new PackBuildResult(document, icons, licenses, summary,
             visualVerification.OrderBy(x => x.BrandId, StringComparer.Ordinal).ToArray(),
             rightsAssessments.OrderBy(x => x.BrandId, StringComparer.Ordinal).ToArray(),
-            runtimeIcons);
+            runtimeIcons,
+            runtimeVisualReferences);
+    }
+
+    private static ThemeSelection[] PreselectThemeAppearances(
+        IReadOnlyList<BrandGroup> groups,
+        IReadOnlyDictionary<string, SourceOverride> overrides,
+        IReadOnlyDictionary<string, AppearanceCompositionOverride> compositions,
+        IReadOnlyList<string> preference,
+        Action<CatalogBuildProgress>? progress,
+        int? requestedDegree,
+        CancellationToken cancellationToken)
+    {
+        if (requestedDegree is <= 0)
+            throw new ArgumentOutOfRangeException(nameof(requestedDegree));
+        // Rasterization, compression, and GC can use helper threads beyond the
+        // Parallel.For workers. Limit foreground workers to 37.5% of logical
+        // processors so total builder CPU remains below the 80% product ceiling
+        // with headroom for those helpers and for the rest of the machine.
+        var degree = requestedDegree ?? Math.Max(1, Environment.ProcessorCount * 3 / 8);
+        var selections = new ThemeSelection?[groups.Count];
+        var failures = new Exception?[groups.Count];
+        var completed = 0;
+        var progressLock = new object();
+        var cpuThrottle = new CpuLoadThrottle();
+        if (groups.Count > 0)
+            progress?.Invoke(new CatalogBuildProgress(0, groups.Count, groups[0].Id));
+        Parallel.For(0, groups.Count, new ParallelOptions
+        {
+            MaxDegreeOfParallelism = degree,
+            CancellationToken = cancellationToken
+        }, index =>
+        {
+            cpuThrottle.Wait(cancellationToken);
+            var group = groups[index];
+            try
+            {
+                selections[index] = SelectThemeAppearances(group, overrides,
+                    compositions.GetValueOrDefault(group.Id), preference, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                failures[index] = ex;
+            }
+            finally
+            {
+                var current = Interlocked.Increment(ref completed);
+                if (progress is not null)
+                    lock (progressLock)
+                        progress(new CatalogBuildProgress(current, groups.Count, group.Id));
+            }
+        });
+        var firstFailure = Array.FindIndex(failures, failure => failure is not null);
+        if (firstFailure >= 0)
+            ExceptionDispatchInfo.Capture(failures[firstFailure]!).Throw();
+        return selections.Select(selection => selection!).ToArray();
     }
 
     private static List<BuildConflict> FindDuplicateSources(IReadOnlyList<SourceRecord> records)
@@ -259,7 +381,8 @@ public sealed class BrandMerger
             var overridden = group.Records.SingleOrDefault(x => x.Provider.Equals(sourceOverride.Provider, StringComparison.OrdinalIgnoreCase)
                 && x.SourceId.Equals(sourceOverride.SourceId, StringComparison.OrdinalIgnoreCase))
                 ?? throw new InputValidationException($"Source override for '{group.Id}' refers to missing record '{sourceOverride.Provider}/{sourceOverride.SourceId}'.");
-            var normalizedOverride = Normalize(overridden, ResolveBackgroundColor(group, overridden), group.Id);
+            var normalizedOverride = Normalize(overridden, ResolveBackgroundColor(group, overridden), group.Id,
+                materializeAegisSvgDefaults: formatVersion == 2);
             return formatVersion == 2
                 ? RenderRuntime(normalizedOverride, group.Id, cancellationToken)
                 : normalizedOverride;
@@ -270,13 +393,17 @@ public sealed class BrandMerger
         foreach (var record in group.Records)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            try { normalized.Add(Normalize(record, ResolveBackgroundColor(group, record), group.Id)); }
+            try
+            {
+                normalized.Add(Normalize(record, ResolveBackgroundColor(group, record), group.Id,
+                    materializeAegisSvgDefaults: formatVersion == 2));
+            }
             catch (InputValidationException ex) { failures.Add($"{record.Provider}/{record.SourceId}: {ex.Message}"); }
         }
         if (normalized.Count == 0)
             throw new InputValidationException($"Brand '{group.Id}' has no source that can be normalized: {string.Join("; ", failures)}");
-        var ranked = normalized.OrderBy(VisualQualityRank)
-            .ThenBy(x => PreferenceRank(x.Record.Provider, preference))
+        var ranked = normalized.OrderBy(x => PreferenceRank(x.Record.Provider, preference))
+            .ThenBy(VisualQualityRank)
             .ThenBy(x => QualityRank(x.Record.Quality)).ThenBy(x => x.Record.Provider, StringComparer.Ordinal)
             .ThenBy(x => x.Record.SourceId, StringComparer.Ordinal).ToArray();
         if (formatVersion == 1) return ranked[0];
@@ -289,15 +416,298 @@ public sealed class BrandMerger
         throw new InputValidationException($"Brand '{group.Id}' has no source with a valid runtime rendering: {string.Join("; ", failures)}");
     }
 
+    private static ThemeSelection SelectThemeAppearances(
+        BrandGroup group,
+        IReadOnlyDictionary<string, SourceOverride> overrides,
+        AppearanceCompositionOverride? composition,
+        IReadOnlyList<string> preference,
+        CancellationToken cancellationToken)
+    {
+        IEnumerable<SourceRecord> records = group.Records;
+        var sourceOverride = overrides.GetValueOrDefault(group.Id);
+        if (composition is not null)
+        {
+            if (sourceOverride is not null
+                && (!sourceOverride.Provider.Equals(composition.Provider, StringComparison.OrdinalIgnoreCase)
+                    || !sourceOverride.SourceId.Equals(composition.SourceId, StringComparison.OrdinalIgnoreCase)))
+                throw new InputValidationException($"Appearance composition for '{group.Id}' conflicts with its source override.");
+            if (sourceOverride?.LightForegroundColor is not null
+                || sourceOverride?.DarkForegroundColor is not null)
+                throw new InputValidationException(
+                    $"Appearance composition for '{group.Id}' cannot also define reviewed theme foreground colors.");
+            var composed = group.Records.SingleOrDefault(record =>
+                record.Provider.Equals(composition.Provider, StringComparison.OrdinalIgnoreCase)
+                && record.SourceId.Equals(composition.SourceId, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InputValidationException($"Appearance composition for '{group.Id}' refers to missing record '{composition.Provider}/{composition.SourceId}'.");
+            records = [composed];
+        }
+        else if (sourceOverride is not null)
+        {
+            var overridden = group.Records.SingleOrDefault(record =>
+                record.Provider.Equals(sourceOverride.Provider, StringComparison.OrdinalIgnoreCase)
+                && record.SourceId.Equals(sourceOverride.SourceId, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InputValidationException($"Source override for '{group.Id}' refers to missing record '{sourceOverride.Provider}/{sourceOverride.SourceId}'.");
+            records = [overridden];
+        }
+
+        // Rank with source metadata and static SVG paint information first.
+        // Full normalization/rasterization is deliberately performed only for
+        // the first usable source. The old v3 implementation rendered every
+        // source twice before selecting one, which multiplied full-catalog
+        // build time without improving validation of the packaged winner.
+        var rankedRecords = records
+            .OrderBy(record => PreferenceRank(record.Provider, preference))
+            .ThenBy(StaticVisualQualityRank)
+            .ThenBy(record => QualityRank(record.Quality))
+            .ThenBy(record => record.Provider, StringComparer.Ordinal)
+            .ThenBy(record => record.SourceId, StringComparer.Ordinal)
+            .ToArray();
+        var failures = new List<string>();
+        foreach (var record in rankedRecords)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var workCache = new ThemeWorkCache();
+                return new ThemeSelection(
+                    record,
+                    SelectThemeAppearance(record, group.Id, "lightTheme", group.Manual?.BackgroundColor,
+                        composition, sourceOverride, workCache, cancellationToken),
+                    SelectThemeAppearance(record, group.Id, "darkTheme", group.Manual?.BackgroundColor,
+                        composition, sourceOverride, workCache, cancellationToken));
+            }
+            catch (InputValidationException ex)
+            {
+                failures.Add($"{record.Provider}/{record.SourceId}: {ex.Message}");
+            }
+        }
+        throw new InputValidationException($"Brand '{group.Id}' has no source with valid themed appearances: {string.Join("; ", failures)}");
+    }
+
+    private static ThemeAppearanceSelection SelectThemeAppearance(
+        SourceRecord record,
+        string brandId,
+        string theme,
+        string? explicitBackground,
+        AppearanceCompositionOverride? composition,
+        SourceOverride? sourceOverride,
+        ThemeWorkCache workCache,
+        CancellationToken cancellationToken)
+    {
+        var sourceVariants = (composition is null ? record.Variants ?? [] : [])
+            .Where(variant => IsVariantCandidate(record.Provider, variant.Kind, theme))
+            .ToArray();
+        var intendedVariants = sourceVariants
+            .Where(variant => IsVariantEligible(record.Provider, variant.Kind, theme))
+            .ToArray();
+        var variants = intendedVariants
+            .Select(variant => (Variant: (SourceAssetVariant?)variant, Preference: 0))
+            // An opposite-theme Dashboard asset is a safe fallback only when
+            // the provider actually declared an intended asset and its pixels
+            // failed the surface-contrast check. If the intended relationship
+            // is absent, retain the default artwork instead of guessing from
+            // a lone variant.
+            .Concat(intendedVariants.Length == 0
+                ? []
+                : sourceVariants.Where(variant => !IsVariantEligible(record.Provider, variant.Kind, theme))
+                    .Select(variant => (Variant: (SourceAssetVariant?)variant, Preference: 1)))
+            .OrderBy(candidate => candidate.Preference)
+            .ThenBy(candidate => candidate.Variant!.SourceId, StringComparer.Ordinal)
+            .Append((null, 2))
+            .ToArray();
+        var failures = new List<string>();
+        foreach (var candidate in variants)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var svg = candidate.Variant?.Svg ?? record.Svg;
+                var sourceId = candidate.Variant?.SourceId ?? record.SourceId;
+                var assetPath = candidate.Variant?.AssetPath ?? record.AssetPath;
+                var themeSurface = theme == "lightTheme" ? "#FFFFFF" : "#121212";
+                // Preserve unpaired artwork on a neutral light tile in either
+                // app theme. Only a provider-supplied dark-theme appearance is
+                // presumed suitable for a dark tile. This favors authentic
+                // source paint over automatic dark-mode recoloring.
+                var preferredBackground = explicitBackground
+                    ?? (theme == "darkTheme" && candidate.Variant is not null ? "#121212" : "#FFFFFF");
+                var reviewedThemeColor = theme == "lightTheme"
+                    ? sourceOverride?.LightForegroundColor
+                    : sourceOverride?.DarkForegroundColor;
+                var implicitColor = reviewedThemeColor
+                    ?? (record.Provider.Equals("simple-icons", StringComparison.OrdinalIgnoreCase)
+                        ? record.Metadata.GetValueOrDefault("nativeBrandColor")
+                        : null);
+                var visualSourceSvg = implicitColor is null
+                    ? svg
+                    : SvgNormalizer.MaterializeInheritedFill(svg, implicitColor,
+                        $"{record.Provider}/{sourceId} for '{brandId}' ({theme})");
+                var normalized = workCache.Normalize(visualSourceSvg, preferredBackground,
+                    materializeImplicitBlackFill: record.Provider.Equals("aegis", StringComparison.OrdinalIgnoreCase),
+                    preserveEmbeddedBackground: true,
+                    implicitFillColor: implicitColor,
+                    preferHighResolutionRasterFallback: true,
+                    useRuntimeVisualProfile: true);
+                var preservedFullBackground = normalized.Operations.Contains("preserved-full-logo-background", StringComparer.Ordinal);
+                var sourceBackedComposition = IsSourceBackedCompleteComposition(record, normalized);
+                var visibleTransparentBrandMark = composition is null
+                    && explicitBackground is null
+                    && implicitColor is not null
+                    && normalized.RuntimeRgba is not null
+                    && RuntimeIconRenderer.HasUsableSurfaceContrast(themeSurface, normalized.RuntimeRgba);
+                var complete = preservedFullBackground || sourceBackedComposition || visibleTransparentBrandMark;
+                if (candidate.Variant is not null
+                    && !complete
+                    && normalized.RuntimeRgba is not null
+                    && !RuntimeIconRenderer.HasUsableSurfaceContrast(themeSurface, normalized.RuntimeRgba))
+                    throw new InputValidationException(
+                        $"Provider-supplied artwork '{sourceId}' has insufficient foreground contrast on the {theme} surface '{themeSurface}'.");
+                if (sourceBackedComposition && !preservedFullBackground)
+                {
+                    normalized = normalized with
+                    {
+                        Operations = normalized.Operations.Append("source-backed-complete-composition")
+                            .OrderBy(operation => operation, StringComparer.Ordinal).ToArray()
+                    };
+                }
+                if (implicitColor is not null)
+                {
+                    normalized = normalized with
+                    {
+                        Operations = normalized.Operations.Append("applied-provider-foreground-color")
+                            .Distinct(StringComparer.Ordinal)
+                            .OrderBy(operation => operation, StringComparer.Ordinal).ToArray()
+                    };
+                }
+                if (reviewedThemeColor is not null)
+                {
+                    normalized = normalized with
+                    {
+                        Operations = normalized.Operations.Append("applied-reviewed-theme-foreground-color")
+                            .Distinct(StringComparer.Ordinal)
+                            .OrderBy(operation => operation, StringComparer.Ordinal).ToArray()
+                    };
+                }
+                if (composition is not null)
+                {
+                    complete = true;
+                    normalized = normalized with
+                    {
+                        Operations = normalized.Operations
+                            .Append("reviewed-enclosed-matte-composition")
+                            .Distinct(StringComparer.Ordinal)
+                            .OrderBy(operation => operation, StringComparer.Ordinal).ToArray()
+                    };
+                }
+                var role = complete ? "complete-icon" : "foreground";
+                var previewBackground = complete ? explicitBackground ?? themeSurface : normalized.BackgroundColor;
+                if (!complete && normalized.RuntimeRgba is not null)
+                    previewBackground = RuntimeIconRenderer.EnsureVisibleBackground(
+                        previewBackground, normalized.RuntimeRgba);
+                var diagnostic = $"{record.Provider}/{sourceId} for '{brandId}' ({theme})";
+                var requiresDirectSourceGate = normalized.RuntimeRgba is not null;
+                var runtime = workCache.Render(normalized, previewBackground, diagnostic,
+                    composition, requiresDirectSourceGate ? visualSourceSvg : null, cancellationToken);
+                var selection = composition is not null ? "reviewed-badge-composition"
+                    : candidate.Variant is not null ? "native-theme-variant"
+                    : reviewedThemeColor is not null ? "brand-color-foreground"
+                    : complete ? "complete-source-artwork"
+                    : implicitColor is not null ? "brand-color-foreground"
+                    : "source-default";
+                var reason = composition is not null
+                    ? composition.Rationale
+                    : candidate.Variant is not null
+                    ? $"Selected provider-supplied {theme} artwork '{sourceId}' after normalization and visual verification."
+                    : reviewedThemeColor is not null
+                        ? $"{sourceOverride!.AppearanceRationale} Applied {reviewedThemeColor} for {theme}."
+                    : complete
+                            ? $"Preserved the source's complete visual composition for {theme}."
+                        : implicitColor is not null
+                            ? $"Preserved the provider's documented primary brand color on a contrast-checked {theme} tile."
+                            : $"Used the source artwork with a deterministic contrast-checked {theme} background.";
+                return new ThemeAppearanceSelection(theme, record, sourceId, assetPath,
+                    normalized, runtime, role, previewBackground, selection, reason,
+                    composition?.Mode, composition?.MatteColor,
+                    composition is null && requiresDirectSourceGate ? visualSourceSvg : null);
+            }
+            catch (InputValidationException ex)
+            {
+                failures.Add($"{candidate.Variant?.SourceId ?? record.SourceId}: {ex.Message}");
+            }
+        }
+        throw new InputValidationException($"No usable {theme} artwork: {string.Join("; ", failures)}");
+    }
+
+    private static int StaticVisualQualityRank(SourceRecord record)
+    {
+        var svg = Encoding.UTF8.GetString(record.Svg);
+        var colors = SourcePaintColors(record.Svg);
+        var chromatic = colors.Count(IsChromatic);
+        var rank = chromatic >= 2 ? 0
+            : chromatic == 1 || colors.Count >= 2 ? 2
+            : colors.Count == 1 ? 4
+            : 5;
+        // These constructs can still be selected, but normalization normally
+        // has to raster-flatten them. Prefer a faithful vector candidate when
+        // one is available, matching the existing quality policy cheaply.
+        if (svg.Contains("<linearGradient", StringComparison.OrdinalIgnoreCase)
+            || svg.Contains("<radialGradient", StringComparison.OrdinalIgnoreCase)
+            || svg.Contains("<image", StringComparison.OrdinalIgnoreCase)
+            || svg.Contains("<filter", StringComparison.OrdinalIgnoreCase))
+            rank += 10;
+        return rank;
+    }
+
+    private static bool IsSourceBackedCompleteComposition(
+        SourceRecord record,
+        SvgNormalizationResult normalized)
+        => (record.Provider.Equals("aegis", StringComparison.OrdinalIgnoreCase)
+                || record.Provider.Equals("dashboard-icons", StringComparison.OrdinalIgnoreCase))
+            && normalized.ForegroundColors.Count >= 2;
+
+    private static HashSet<string> SourcePaintColors(byte[] svgBytes)
+    {
+        var svg = Encoding.UTF8.GetString(svgBytes);
+        var colors = new HashSet<string>(StringComparer.Ordinal);
+        for (var index = 0; index + 6 < svg.Length; index++)
+        {
+            if (svg[index] != '#') continue;
+            var value = svg.Substring(index, 7).ToUpperInvariant();
+            if (ProviderHelpers.IsHexColor(value[1..])) colors.Add(value);
+        }
+        return colors;
+    }
+
+    private static bool IsVariantEligible(string provider, string kind, string theme)
+    {
+        if (provider.Equals("dashboard-icons", StringComparison.OrdinalIgnoreCase))
+            return kind.Equals(theme == "lightTheme" ? "light-theme" : "dark-theme", StringComparison.Ordinal);
+        // Aegis variations are retained as auditable source relationships, but
+        // their colors are collection-specific adaptations rather than a
+        // machine-readable assertion of official light/dark brand artwork.
+        // Do not select them automatically without a reviewed appearance map.
+        return false;
+    }
+
+    private static bool IsVariantCandidate(string provider, string kind, string theme)
+    {
+        if (provider.Equals("dashboard-icons", StringComparison.OrdinalIgnoreCase))
+            return kind is "light-theme" or "dark-theme";
+        return IsVariantEligible(provider, kind, theme);
+    }
+
     private static NormalizedSelection Normalize(
         SourceRecord record,
         string backgroundColor,
-        string brandId)
+        string brandId,
+        bool materializeAegisSvgDefaults)
     {
         try
         {
             var materializeImplicitBlackFill = record.Provider.Equals("simple-icons", StringComparison.OrdinalIgnoreCase)
-                && backgroundColor.Equals("#FFFFFF", StringComparison.Ordinal);
+                    && backgroundColor.Equals("#FFFFFF", StringComparison.Ordinal)
+                || materializeAegisSvgDefaults
+                    && record.Provider.Equals("aegis", StringComparison.OrdinalIgnoreCase);
             var normalized = SvgNormalizer.Normalize(record.Svg, backgroundColor, materializeImplicitBlackFill);
             return new NormalizedSelection(record, normalized, null);
         }
@@ -333,14 +743,14 @@ public sealed class BrandMerger
         var usesGeneratedNeutral = operations.Contains("selected-light-contrast-background", StringComparer.Ordinal)
             || operations.Contains("selected-dark-contrast-background", StringComparer.Ordinal);
         var hasSourceBackedBackground = operations.Contains("promoted-full-logo-background", StringComparer.Ordinal)
+            || operations.Contains("preserved-full-logo-background", StringComparer.Ordinal)
             || (!usesGeneratedNeutral
                 && !selection.Normalized.BackgroundColor.Equals("#334155", StringComparison.Ordinal));
         var colorCount = selection.Normalized.ForegroundColors.Count;
         var chromaticColorCount = selection.Normalized.ForegroundColors.Count(IsChromatic);
 
-        // Prefer a faithfully normalized full-color logo over a monochrome badge
-        // from an otherwise preferred provider. Provider preference remains the
-        // deterministic tie-breaker for candidates with equivalent visual value.
+        // Rank visual quality within a provider. The caller applies explicit
+        // provider preference first, while source overrides remain authoritative.
         var vectorQualityRank = chromaticColorCount >= 2 ? 0
             : hasSourceBackedBackground && colorCount >= 1 ? 1
             : chromaticColorCount >= 1 || colorCount >= 2 ? 2
@@ -506,16 +916,103 @@ public sealed class BrandMerger
     private sealed record PendingBrand(
         string Id,
         string DisplayName,
-        string BackgroundColor,
+        string? BackgroundColor,
         string Icon,
         SelectedSource SelectedSource,
         IReadOnlyList<SourceReference> Sources,
-        RuntimeIcon? RuntimeIcon);
+        RuntimeIcon? RuntimeIcon,
+        ThemeAppearances? Appearances);
 
     private sealed record NormalizedSelection(
         SourceRecord Record,
         SvgNormalizationResult Normalized,
         RuntimeIconRenderResult? Runtime);
+
+    private sealed record ThemeSelection(
+        SourceRecord Record,
+        ThemeAppearanceSelection LightTheme,
+        ThemeAppearanceSelection DarkTheme);
+
+    private sealed record ThemeAppearanceSelection(
+        string Theme,
+        SourceRecord Record,
+        string SourceId,
+        string AssetPath,
+        SvgNormalizationResult Normalized,
+        RuntimeIconRenderResult Runtime,
+        string AssetRole,
+        string PreviewBackgroundColor,
+        string Selection,
+        string Reason,
+        string? CompositionMode,
+        string? CompositionColor,
+        byte[]? VisualSourceSvg);
+
+    private sealed class ThemeWorkCache
+    {
+        private readonly Dictionary<NormalizationWorkKey, SvgNormalizationResult> _normalizations = [];
+        private readonly Dictionary<RuntimeWorkKey, RuntimeIconRenderResult> _renders = [];
+
+        public SvgNormalizationResult Normalize(
+            byte[] svg,
+            string backgroundColor,
+            bool materializeImplicitBlackFill = false,
+            bool preserveEmbeddedBackground = false,
+            string? implicitFillColor = null,
+            bool preferHighResolutionRasterFallback = false,
+            bool useRuntimeVisualProfile = false)
+        {
+            var key = new NormalizationWorkKey(Hash(svg), backgroundColor,
+                materializeImplicitBlackFill, preserveEmbeddedBackground,
+                implicitFillColor, preferHighResolutionRasterFallback, useRuntimeVisualProfile);
+            if (_normalizations.TryGetValue(key, out var cached)) return cached;
+            var normalized = SvgNormalizer.Normalize(svg, backgroundColor,
+                materializeImplicitBlackFill, preserveEmbeddedBackground,
+                implicitFillColor, preferHighResolutionRasterFallback,
+                useRuntimeVisualProfile: useRuntimeVisualProfile);
+            _normalizations.Add(key, normalized);
+            return normalized;
+        }
+
+        public RuntimeIconRenderResult Render(
+            SvgNormalizationResult normalized,
+            string previewBackground,
+            string diagnostic,
+            AppearanceCompositionOverride? composition,
+            byte[]? visualSourceSvg,
+            CancellationToken cancellationToken)
+        {
+            var key = new RuntimeWorkKey(Hash(normalized.Svg), previewBackground,
+                composition?.Mode, composition?.MatteColor,
+                normalized.RuntimeRgba is null ? null : Hash(normalized.RuntimeRgba));
+            if (_renders.TryGetValue(key, out var cached)) return cached;
+            var rendered = composition is null
+                ? RuntimeIconRenderer.RenderThemed(normalized.Svg, previewBackground, diagnostic,
+                    cancellationToken, visualSourceSvg, normalized.RuntimeRgba)
+                : RuntimeIconRenderer.RenderReviewedBadgeComposition(normalized.Svg,
+                    composition.MatteColor, previewBackground, diagnostic, cancellationToken);
+            _renders.Add(key, rendered);
+            return rendered;
+        }
+
+        private static string Hash(byte[] value) => Convert.ToHexString(SHA256.HashData(value));
+    }
+
+    private sealed record NormalizationWorkKey(
+        string SvgHash,
+        string BackgroundColor,
+        bool MaterializeImplicitBlackFill,
+        bool PreserveEmbeddedBackground,
+        string? ImplicitFillColor,
+        bool PreferHighResolutionRasterFallback,
+        bool UseRuntimeVisualProfile);
+
+    private sealed record RuntimeWorkKey(
+        string SvgHash,
+        string PreviewBackgroundColor,
+        string? CompositionMode,
+        string? CompositionColor,
+        string? RuntimeRgbaHash);
 
     private sealed record AliasResolution(
         IReadOnlyList<IssuerAliasEntry> Index,

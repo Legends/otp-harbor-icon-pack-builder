@@ -21,7 +21,9 @@ public sealed class SourceAcquirer : ISourceAcquirer, IDisposable
     // Version 7 revalidates acquired SVGs with the current executable-content and external-resource
     // rules. Older Dashboard Icons caches may contain files that the current admission pipeline
     // intentionally excludes, so they must not be reused.
-    private const int ManifestVersion = 7;
+    // v9 adds pinned Dashboard light/dark assets while keeping variant-only
+    // slugs out of the provider's canonical metadata record set.
+    private const int ManifestVersion = 9;
     private readonly IReadOnlyDictionary<string, IUpstreamDefinition> _definitions;
     private readonly IRemoteContentClient _client;
     private readonly bool _ownsClient;
@@ -40,47 +42,63 @@ public sealed class SourceAcquirer : ISourceAcquirer, IDisposable
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(options.CacheDirectory);
-        var results = new List<IconSourceInput>();
-        foreach (var definition in _definitions.Values.OrderBy(x => x.Id, StringComparer.Ordinal))
+        var definitions = _definitions.Values.OrderBy(x => x.Id, StringComparer.Ordinal).ToArray();
+        // The pinned providers are independent network inputs with disjoint
+        // cache directories. Acquire them concurrently, then return results in
+        // the same stable provider order used by the former serial loop.
+        var tasks = definitions.Select(definition => AcquireOneAsync(
+            definition, localOverrides, options, cancellationToken)).ToArray();
+        try
+        {
+            await Task.WhenAll(tasks);
+        }
+        catch
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (localOverrides.TryGetValue(definition.Id, out var localPath))
-            {
-                if (!File.Exists(localPath))
-                    throw new InputValidationException($"{definition.Id}: local source archive does not exist: {localPath}");
-                results.Add(new IconSourceInput(definition.Id, Path.GetFullPath(localPath)));
-                continue;
-            }
-
-            if (options.Offline)
-            {
-                results.Add(await FindOfflineCacheAsync(definition.Id, definition.SupportedIdentity,
-                        options.CacheDirectory, cancellationToken)
-                    ?? throw new InvalidDataException($"{definition.Id}: offline mode requires a valid cached source or an explicit --{definition.Id} override."));
-                continue;
-            }
-
-            ResolvedUpstream resolved;
-            try { resolved = await definition.ResolveSupportedAsync(_client, cancellationToken); }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidDataException)
-            {
-                throw new InvalidDataException($"{definition.Id}: failed to resolve the supported upstream source: {ex.Message}", ex);
-            }
-            ValidateResolvedSource(definition.Id, resolved);
-            var cached = await TryReadCacheAsync(
-                CacheDirectory(options.CacheDirectory, resolved), definition.Id, resolved.Identity, cancellationToken);
-            if (cached is not null && !options.Refresh)
-            {
-                results.Add(cached);
-                continue;
-            }
-            results.Add(await DownloadAndCacheAsync(definition, resolved, options.CacheDirectory, cancellationToken));
+            // Preserve deterministic provider-priority diagnostics when more
+            // than one independent acquisition fails at once.
+            foreach (var task in tasks)
+                if (task.Exception is not null)
+                    throw task.Exception.InnerExceptions[0];
+            throw;
         }
-        return results;
+        return tasks.Select(task => task.Result).ToArray();
+    }
+
+    private async Task<IconSourceInput> AcquireOneAsync(
+        IUpstreamDefinition definition,
+        IReadOnlyDictionary<string, string> localOverrides,
+        SourceAcquisitionOptions options,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (localOverrides.TryGetValue(definition.Id, out var localPath))
+        {
+            if (!File.Exists(localPath))
+                throw new InputValidationException($"{definition.Id}: local source archive does not exist: {localPath}");
+            return new IconSourceInput(definition.Id, Path.GetFullPath(localPath));
+        }
+
+        if (options.Offline)
+            return await FindOfflineCacheAsync(definition.Id, definition.SupportedIdentity,
+                    options.CacheDirectory, cancellationToken)
+                ?? throw new InvalidDataException($"{definition.Id}: offline mode requires a valid cached source or an explicit --{definition.Id} override.");
+
+        ResolvedUpstream resolved;
+        try { resolved = await definition.ResolveSupportedAsync(_client, cancellationToken); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidDataException)
+        {
+            throw new InvalidDataException($"{definition.Id}: failed to resolve the supported upstream source: {ex.Message}", ex);
+        }
+        ValidateResolvedSource(definition.Id, resolved);
+        var cached = await TryReadCacheAsync(
+            CacheDirectory(options.CacheDirectory, resolved), definition.Id, resolved.Identity, cancellationToken);
+        if (cached is not null && !options.Refresh) return cached;
+        return await DownloadAndCacheAsync(definition, resolved, options.CacheDirectory, cancellationToken);
     }
 
     private async Task<IconSourceInput> DownloadAndCacheAsync(

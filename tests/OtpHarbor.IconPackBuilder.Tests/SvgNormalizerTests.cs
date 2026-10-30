@@ -215,6 +215,17 @@ public sealed class SvgNormalizerTests
     }
 
     [Fact]
+    public void RuntimeBackgroundSelectionUsesActualPackagedPixels()
+    {
+        var rgba = new byte[RuntimeIconRenderer.MaximumDecodedBytes];
+        for (var offset = 0; offset < rgba.Length; offset += 4)
+            rgba[offset + 3] = 255;
+
+        Assert.Equal("#FFFFFF", RuntimeIconRenderer.EnsureVisibleBackground("#000000", rgba));
+        Assert.Equal("#FFFFFF", RuntimeIconRenderer.EnsureVisibleBackground("#FFFFFF", rgba));
+    }
+
+    [Fact]
     public void RuntimeRendererHonorsCancellation()
     {
         using var cancellation = new CancellationTokenSource();
@@ -269,6 +280,124 @@ public sealed class SvgNormalizerTests
             .SelectMany(path => new[] { (string?)path.Attribute("fill"), (string?)path.Attribute("stroke") })
             .Where(paint => paint is not null && paint != "none");
         Assert.DoesNotContain(normalized.BackgroundColor, paints);
+    }
+
+    [Fact]
+    public void VersionThreeRasterFallbackRetainsBoundedFinalSizeCanonicalPixels()
+    {
+        var source = Encoding.UTF8.GetBytes("""
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="10">
+              <defs><linearGradient id="g"><stop stop-color="#FF0000"/><stop offset="1" stop-color="#0000FF"/></linearGradient></defs>
+              <ellipse cx="10" cy="5" rx="9" ry="4" fill="url(#g)"/>
+            </svg>
+            """);
+        var normalized = SvgNormalizer.Normalize(source, "#FFFFFF", preferHighResolutionRasterFallback: true);
+        var legacyProfile = SvgNormalizer.Normalize(source, "#FFFFFF");
+
+        Assert.Contains("runtime-rasterized-at-128px", normalized.Operations);
+        Assert.NotNull(normalized.RuntimeRgba);
+        Assert.Equal(RuntimeIconRenderer.MaximumDecodedBytes, normalized.RuntimeRgba!.Length);
+        Assert.True(normalized.Svg.Length < 1024 * 1024);
+        Assert.True(normalized.VisualMetrics.Resolved);
+        Assert.Null(legacyProfile.RuntimeRgba);
+
+        var runtime = RuntimeIconRenderer.RenderThemed(
+            normalized.Svg,
+            normalized.BackgroundColor,
+            "high-resolution-runtime-fallback",
+            visualSourceSvg: source,
+            canonicalRuntimeRgba: normalized.RuntimeRgba);
+
+        Assert.True(runtime.VisualMetrics.Resolved);
+        Assert.Equal(0, runtime.VisualMetrics.MateriallyDifferentPixels);
+        Assert.Equal(runtime.Sha256, DeterministicPng.Sha256(runtime.Png));
+    }
+
+    [Fact]
+    public void VersionThreeTextSourceNeverUsesFinalSizeRuntimeRaster()
+    {
+        var normalized = SvgNormalizer.Normalize(Encoding.UTF8.GetBytes("""
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+              <rect width="64" height="64" rx="12" fill="#605DFF"/>
+              <text x="32" y="48" font-family="Inter, sans-serif" font-size="46" text-anchor="middle" fill="#F43098">X</text>
+            </svg>
+            """), "#FFFFFF", preferHighResolutionRasterFallback: true);
+
+        Assert.DoesNotContain("runtime-rasterized-at-128px", normalized.Operations);
+        Assert.Null(normalized.RuntimeRgba);
+        Assert.True(normalized.VisualMetrics.Resolved);
+    }
+
+    [Fact]
+    public void VersionThreeEmptyTextElementsDoNotForceLowResolutionRasterFallback()
+    {
+        var normalized = SvgNormalizer.Normalize(Encoding.UTF8.GetBytes("""
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+              <defs>
+                <linearGradient id="g"><stop stop-color="#0B6E09"/><stop offset="1" stop-color="#8EBF6A"/></linearGradient>
+              </defs>
+              <text x="0" y="0" font-family="Unavailable Font" />
+              <g><text><tspan>   </tspan></text></g>
+              <path d="M16 64C16 28 52 8 64 48C76 8 112 28 112 64C112 96 80 116 64 120C48 116 16 96 16 64Z" fill="url(#g)"/>
+            </svg>
+            """), "#FFFFFF", preferHighResolutionRasterFallback: true,
+            preserveEmbeddedBackground: true, useRuntimeVisualProfile: true);
+
+        Assert.Contains("runtime-source-reference-at-128px", normalized.Operations);
+        Assert.DoesNotContain(normalized.Operations,
+            operation => operation.StartsWith("raster-flattened-at-", StringComparison.Ordinal));
+        Assert.NotNull(normalized.RuntimeRgba);
+        Assert.Equal(RuntimeIconRenderer.MaximumDecodedBytes, normalized.RuntimeRgba!.Length);
+    }
+
+    [Fact]
+    public void VersionThreeRuntimeProfilePreservesExplicitTransparentRootFill()
+    {
+        var normalized = SvgNormalizer.Normalize(Encoding.UTF8.GetBytes("""
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="transparent">
+              <path d="M3 12h18" stroke="#1B75BC" stroke-width="4"/>
+            </svg>
+            """), "#FFFFFF", useRuntimeVisualProfile: true);
+
+        Assert.Contains("runtime-source-reference-at-128px", normalized.Operations);
+        Assert.NotNull(normalized.RuntimeRgba);
+        Assert.Contains(normalized.RuntimeRgba!.Chunk(4), pixel => pixel[3] == 0);
+        Assert.Contains(normalized.RuntimeRgba.Chunk(4), pixel => pixel[3] > 0);
+    }
+
+    [Fact]
+    public void VersionThreeRuntimeProfileMaterializesRootCurrentColorDeterministically()
+    {
+        var normalized = SvgNormalizer.Normalize(Encoding.UTF8.GetBytes("""
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M3 3h18v18H3z"/>
+            </svg>
+            """), "#FFFFFF", useRuntimeVisualProfile: true);
+
+        Assert.NotNull(normalized.RuntimeRgba);
+        Assert.Equal("#FFFFFF", normalized.BackgroundColor);
+        Assert.Contains(normalized.RuntimeRgba!.Chunk(4), pixel =>
+            pixel[0] == 0 && pixel[1] == 0 && pixel[2] == 0 && pixel[3] == 255);
+    }
+
+    [Fact]
+    public void EmbeddedCompositionRecognitionRequiresLargeBackplateContainingContrastingDetail()
+    {
+        var complete = SvgNormalizer.Normalize(Encoding.UTF8.GetBytes("""
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+              <rect x="1" y="1" width="22" height="22" rx="4" fill="#EC1B24"/>
+              <path d="M7 8h10v8H7z" fill="#FFFFFF"/>
+            </svg>
+            """), "#FFFFFF", recognizeEmbeddedComposition: true);
+        var separateMark = SvgNormalizer.Normalize(Encoding.UTF8.GetBytes("""
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+              <circle cx="6" cy="12" r="5" fill="#EC1B24"/>
+              <circle cx="18" cy="12" r="5" fill="#FFFFFF"/>
+            </svg>
+            """), "#334155", recognizeEmbeddedComposition: true);
+
+        Assert.Contains("recognized-embedded-composition", complete.Operations);
+        Assert.DoesNotContain("recognized-embedded-composition", separateMark.Operations);
     }
 
     private static SvgNormalizationResult Normalize(string svg) =>

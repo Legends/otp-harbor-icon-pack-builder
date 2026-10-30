@@ -1,6 +1,24 @@
 {
   "version": 1,
   "overrides": {
+    "7zip": {
+      "provider": "simple-icons",
+      "sourceId": "7zip"
+    },
+    "about-me": {
+      "provider": "simple-icons",
+      "sourceId": "aboutdotme",
+      "lightForegroundColor": "#333333",
+      "darkForegroundColor": "#FFFFFF",
+      "appearanceRationale": "Reviewed monochrome brand treatment: preserve the documented dark gray mark on light surfaces and use the source-supported white mark on dark surfaces."
+    },
+    "abuse-ch": {
+      "provider": "simple-icons",
+      "sourceId": "abusedotch",
+      "lightForegroundColor": "#00465B",
+      "darkForegroundColor": "#FFFFFF",
+      "appearanceRationale": "Reviewed monochrome brand treatment: preserve the documented blue mark on light surfaces and use its white monochrome appearance on dark surfaces."
+    },
     "microsoft-edge": {
       "provider": "dashboard-icons",
       "sourceId": "microsoft-edge"

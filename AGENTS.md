@@ -147,7 +147,12 @@ Use the Aegis pack metadata when available, especially:
 - primary icon path,
 - pack/version information.
 
-Prefer primary icons over variation/generic assets unless an explicit mapping says otherwise.
+Prefer primary icons as canonical identities. Associate recognized `bg.var`,
+`fg.var`, and `fg.bg.var` artwork with that primary record for provenance and
+future reviewed mappings without turning a variation into a separate brand.
+Do not automatically select these variations as theme artwork: their colors
+are collection-specific adaptations, not machine-readable claims of official
+brand appearances. Generic/category artwork remains excluded.
 
 Aegis issuer values are valuable alias candidates because the collection is curated around TOTP issuer matching.
 
@@ -165,6 +170,9 @@ Use upstream metadata such as:
 
 Do not assume the Simple Icons slug should become the `.otphicons` canonical ID.
 
+Simple Icons `hex` is a primary foreground brand color. It is not inherently a
+tile background color. Format 3 must preserve that distinction.
+
 ### Dashboard Icons
 
 Use upstream metadata such as:
@@ -174,7 +182,10 @@ Use upstream metadata such as:
 - available SVG variants,
 - source/provenance fields where available.
 
-Prefer a normal/default SVG over light/dark variants unless an override explicitly chooses a variant.
+Keep the normal/default SVG and acquire referenced light/dark SVG variants from
+the same pinned snapshot. Format 3 may select a native variant for its intended
+application theme after normal quality and visual validation; a variant does
+not automatically beat higher-fidelity default artwork.
 
 Do not assume the Dashboard Icons website catalog is identical to the native icon files in the repository. Treat only the user-supplied source data as input.
 
@@ -205,6 +216,14 @@ Format 2 is deliberately PNG-only: it omits `icon` entirely and requires one
 provider-independent `runtimeIcon` descriptor for
 `runtime/foreground-128/<canonical-brand-id>.png`. Canonical SVG remains an
 internal normalization and verification artifact of the builder for v2.
+
+Format 3 is PNG-only and requires resolved `lightTheme` and `darkTheme`
+appearances. Each appearance distinguishes transparent `foreground` artwork
+with a solid tile background from a `complete-icon` whose composition is
+complete and requires no consumer-added tile. A complete icon may still have a
+transparent exterior; `embedded` means that every intended visible background
+pixel is already in the PNG. Identical rendered appearances share a
+content-addressed PNG.
 
 ## Alias and issuer normalization
 
@@ -265,15 +284,16 @@ Selection must be deterministic.
 Use this order:
 
 1. explicit entry in `mappings/source-overrides.json`,
-2. configured provider preference,
-3. provider-specific quality rules,
-4. deterministic fallback.
+2. normalization and visual-fidelity eligibility,
+3. configured provider preference,
+4. theme-specific usability and provider-native variation quality within that provider for v3,
+5. deterministic quality-ranked fallback when a preferred source is unusable.
 
-The initial default provider preference may be:
+The default provider preference is:
 
 ```text
-Aegis primary
 Dashboard Icons default SVG
+Aegis primary
 Simple Icons SVG
 ```
 
@@ -296,6 +316,18 @@ Use for aliases that cannot be safely inferred from upstream metadata.
 ### mappings/source-overrides.json
 
 Use when a specific brand should use an icon from a specific provider/source identifier.
+For reviewed monochrome format-3 artwork, an override may also declare canonical
+light/dark foreground colors plus a mandatory rationale. Theme paint overrides
+must remain explicit and source-backed; never infer broad recoloring rules from
+one dark-theme visibility problem. They must not affect format 1 or 2 rendering.
+
+### mappings/appearance-compositions.json
+
+Use for reviewed format-3 compositions whose opaque interior details are
+supported by source evidence but represented as transparent regions in a
+monochrome source. Each entry must name the exact provider/source record,
+matte color, and rationale. Never infer opaque interiors from closed geometry
+alone; ordinary logo counters and holes must remain transparent.
 
 All mapping files must have deterministic schemas and tests.
 
@@ -327,6 +359,11 @@ Format 2 contains `pack.json`, exactly one
 `runtime/foreground-128/<canonical-brand-id>.png` per brand, and only referenced
 `licenses/` files. It contains no SVG files.
 
+Format 3 contains `pack.json`, referenced
+`runtime/appearance-128/<sha256>.png` assets, and only referenced `licenses/`
+files. It contains no SVG files. Both theme descriptors may reference the same
+PNG when their bytes are identical.
+
 The output schema must have an explicit schema/format version.
 
 Compatible importers should not need to understand Aegis, Simple Icons, or Dashboard Icons once they receive the generated pack.
@@ -354,7 +391,7 @@ Untrusted SVGs may only be rendered after static safety validation, through
 the bounded in-process normalization/verification pipeline, with external
 resource loading and executable content disabled. Rendering must never invoke
 native shell commands or external programs. Canonical SVGs remain data in
-format 1. For format 2 they are internal builder artifacts only; the pack
+format 1. For format 2 and format 3 they are internal builder artifacts only; the pack
 contains deterministic display-ready runtime PNGs and no SVG files.
 
 Use configurable but conservative limits.
@@ -380,6 +417,17 @@ Produce a build summary containing at least:
 - skipped/invalid records.
 
 Add an optional machine-readable conflict report.
+
+## Consumer contract handoff
+
+Any change to a published or provisional `.otphicons` manifest field, allowed
+value, validation rule, render-profile semantic, appearance role/background
+semantic, runtime path, or consumer-visible raster fitting rule must be called
+out explicitly in the completion response. The same change must create or
+update a self-contained transfer prompt for the OTP Harbor Codex agent under
+`docs/`. Do not assume that builder and consumer changes will be made in the
+same task, and do not modify the OTP Harbor repository unless that task
+explicitly authorizes it.
 
 ## CLI behavior
 

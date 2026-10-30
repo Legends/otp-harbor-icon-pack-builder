@@ -22,7 +22,7 @@ public static class PackSerializer
         if (directory is not null) Directory.CreateDirectory(directory);
         await using var file = File.Open(path, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
         using var archive = new ZipArchive(file, ZipArchiveMode.Create, leaveOpen: true);
-        var compression = result.Document.FormatVersion == 2
+        var compression = result.Document.FormatVersion is 2 or 3
             ? CompressionLevel.NoCompression
             : CompressionLevel.SmallestSize;
         await WriteEntryAsync(archive, "pack.json", JsonSerializer.SerializeToUtf8Bytes(result.Document, JsonOptions),
@@ -36,7 +36,9 @@ public static class PackSerializer
         else
         {
             CreateDirectoryEntry(archive, "runtime/");
-            CreateDirectoryEntry(archive, "runtime/foreground-128/");
+            CreateDirectoryEntry(archive, result.Document.FormatVersion == 2
+                ? "runtime/foreground-128/"
+                : "runtime/appearance-128/");
             foreach (var icon in (result.RuntimeIcons ?? new Dictionary<string, byte[]>())
                          .OrderBy(x => x.Key, StringComparer.Ordinal))
                 await WriteEntryAsync(archive, icon.Key, icon.Value, compression, cancellationToken);

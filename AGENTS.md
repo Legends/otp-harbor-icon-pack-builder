@@ -479,6 +479,14 @@ Do not commit entire third-party icon packs as test data.
 
 ## Development behavior for Codex
 
+Use tool calls and context budget efficiently while preserving correctness.
+Batch independent reads, reuse results already obtained, and avoid repeated
+status checks that add no new decision-making information. When monitoring
+GitHub Actions, prefer one watch call or spaced checks at meaningful milestones;
+inspect job details only on failure or when a decision is needed. Verify the
+final workflow and release state once before reporting completion. Do not
+reduce required tests, security checks, or release verification to save credits.
+
 Optimize for the fastest practical first-run build with the best overall user
 experience. There is no mandatory one-minute deadline. Preserve image fidelity,
 security validation, deterministic output, responsive progress, cancellation,

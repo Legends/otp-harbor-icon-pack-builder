@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "OtpHarbor.IconPackBuilder": {
+      "commandName": "Project",
+      "commandLineArgs": "build\r\n--format-version \r\n3\r\n"
+    }
+  }
+}

@@ -1,12 +1,12 @@
 # OTP Harbor Icon Pack Builder
 
-OTP Harbor Icon Pack Builder creates one local `.otphicons` file from tested Aegis Icons, Simple Icons, and Dashboard Icons sources pinned to each builder release. It downloads the source material only while you build the pack; no third-party icon collection is bundled with the executable or hosted in this repository.
+OTP Harbor Icon Pack Builder creates one local `.otphicons` pack from Aegis Icons, Simple Icons, and Dashboard Icons. The builder downloads tested, pinned upstream sources when you run it. The finished pack works offline, and this repository does not bundle or publish third-party icon collections.
 
 ## Download and run
 
-Open the [latest release](https://github.com/Legends/otp-harbor-icon-pack-builder/releases/latest)
-and choose the download for your computer. Starting with v1.2.1, the release
-contains:
+Download the file for your computer from the [latest release](https://github.com/Legends/otp-harbor-icon-pack-builder/releases/latest). On Windows, open the `.exe`; on macOS or Linux, extract the archive and run the included launcher. Press Enter to save `otp-harbor-icons.otphicons` in Downloads. The release includes everything needed to run; the first build needs internet access and may take several minutes.
+
+The executables are unsigned, and the macOS release is not notarized. Check the download against `SHA256SUMS.txt` from the same release before opening it. If macOS blocks the launcher, Control-click it and choose **Open**; do not disable Gatekeeper globally.
 
 | Platform | Download |
 | --- | --- |
@@ -17,243 +17,19 @@ contains:
 | Linux on Intel or AMD | `OtpHarbor.IconPackBuilder-linux-x64.tar.gz` |
 | Linux on ARM64 | `OtpHarbor.IconPackBuilder-linux-arm64.tar.gz` |
 
-### Windows
+## Command-line usage
 
-1. Double-click the downloaded `.exe` file.
-2. Press Enter to accept the proposed output location in your Downloads folder.
-3. Wait for the green `[+] Icon pack created successfully.` message.
-4. Press Enter to close the window.
-
-### macOS
-
-1. Double-click the downloaded `.tar.gz` file to extract it.
-2. Open the extracted folder.
-3. Double-click `Run OTP Harbor Icon Pack Builder.command`.
-4. Press Enter to accept the proposed output location in your Downloads folder.
-5. Wait for the green `[+] Icon pack created successfully.` message.
-
-The macOS release is not currently notarized. If macOS blocks the first launch,
-Control-click the launcher, choose **Open**, and confirm that you want to open
-it. Do not disable Gatekeeper globally.
-
-### Linux
-
-1. Extract the downloaded `.tar.gz` file.
-2. Open the extracted folder.
-3. Run `run-otp-harbor-icon-pack-builder.sh`. When offered a choice by your
-   file manager, choose **Run** or **Run as a program**.
-4. Press Enter to accept the proposed output location in your Downloads folder.
-5. Wait for the green `[+] Icon pack created successfully.` message.
-
-Linux desktop behavior differs by distribution. The archive preserves the
-launcher and executable permissions, but a file manager may still require you
-to mark the launcher as trusted before it will run.
-
-**The finished icon pack file is by default located at:**
-
-```text
-Windows: C:\Users\<you>\Downloads\otp-harbor-icons.otphicons
-macOS:   /Users/<you>/Downloads/otp-harbor-icons.otphicons
-Linux:   /home/<you>/Downloads/otp-harbor-icons.otphicons
-```
-
-All release executables are self-contained: you do not need to install .NET,
-Visual Studio, Node.js, Python, or provider-specific tools. Internet access is
-required when downloading or refreshing the upstream sources. The first build
-can take several minutes while thousands of icons are downloaded, normalized,
-and visually checked.
-
-The executables are currently unsigned. Windows SmartScreen or platform trust
-controls may therefore show a warning. Confirm that the download came from
-this GitHub repository and compare its SHA-256 value with `SHA256SUMS.txt` from
-the same release before opening it.
-
-## What you will see
-
-The builder asks before choosing a different output location and before replacing an existing pack. At both `[Y/n]` prompts, pressing Enter means **Yes**.
-
-During catalog creation, an ASCII progress bar shows the percentage, completed and total brands, current brand, and elapsed time. A successful build ends in green, displays the generated pack location on a separate bright `[OUTPUT]` line, and offers to reveal the file in the platform file manager. An error ends in red and the window remains open so you can read the message.
-
-Alongside the pack, the builder writes:
-
-```text
-otp-harbor-icons.visual-report.json
-otp-harbor-icons.rights-report.json
-```
-
-The visual report confirms that the catalog passed the technical visual gate.
-The rights report records the evidence available for each selected asset.
-Neither technical validation nor an evidence status is legal clearance.
-
-## Files and privacy
-
-The builder contacts the official upstream GitHub repositories for:
-
-- Aegis Icons;
-- Simple Icons;
-- Dashboard Icons.
-
-Each builder release carries a tested compatibility set of exact upstream releases and commits. Release-archive downloads are checked against source-controlled SHA-256 values, and commit-based sources use a full commit ID. Normal builds use those pinned sources instead of following a moving `latest` release or Dashboard Icons `main` branch. Updating the builder updates the supported source set; `--refresh` only redownloads the versions pinned by the installed builder. The Dashboard cache includes metadata-referenced light/dark SVG variants from that same pinned commit and never mixes theme artwork across revisions. Downloads are cached so later builds can reuse validated files, and offline mode accepts only this release's supported cache identity. The cache locations are:
-
-```text
-Windows: %LOCALAPPDATA%\OTP Harbor\IconPackBuilder\cache
-macOS:   ~/Library/Caches/OTP Harbor/IconPackBuilder
-Linux:   ${XDG_CACHE_HOME:-~/.cache}/otp-harbor/icon-pack-builder
-```
-
-Independent provider downloads and Dashboard's individual pinned SVG requests
-use bounded I/O concurrency. Results are validated and assembled in stable
-provider/path order. Catalog rendering uses a conservative worker limit and,
-on Windows and Linux, quietly yields while total system CPU load remains above
-the configured target zone. This keeps the one-time build responsive without
-changing its deterministic output.
-
-The performance goal is the fastest practical first run with a responsive
-computer and faithful icons. There is no fixed one-minute deadline. Image
-quality and complete validation take priority over meeting a time limit;
-download speed, hardware, and other running applications affect completion
-time. Cached-source measurements exclude the initial download cost.
-
-No account data, issuer data, or generated pack is uploaded by this tool. The generated pack and reports remain on your computer.
-
-## Command-line use
-
-Most users can use the launch instructions above. PowerShell users can choose
-an output path explicitly:
+Use `build` to choose an output path. For example, on Windows:
 
 ```powershell
-.\OtpHarbor.IconPackBuilder-win-x64.exe build `
-  --output "$env:USERPROFILE\Downloads\otp-harbor-icons.otphicons"
+.\OtpHarbor.IconPackBuilder-win-x64.exe build --output "$env:USERPROFILE\Downloads\otp-harbor-icons.otphicons"
 ```
 
-From a macOS or Linux terminal, run the executable inside the extracted folder:
+On macOS or Linux, use `./OtpHarbor.IconPackBuilder` in the extracted folder instead. Format 3 is the default. Use `--format-version 1` or `2` only for an older importer.
 
-```sh
-./OtpHarbor.IconPackBuilder build \
-  --output "$HOME/Downloads/otp-harbor-icons.otphicons"
-```
+Use `--offline` for cached or locally supplied sources, `--refresh` to redownload this builder release's pinned sources, and `--non-interactive --force` for unattended replacement. Supply local source archives with `--aegis`, `--simple-icons`, or `--dashboard-icons`. The default rights policy, `preserve`, records evidence without filtering assets that lack it. Use `--rights-policy documented-only` to exclude those assets, or `require-documented` to stop if a selected asset lacks evidence. Run `--help` for all options.
 
-For unattended use:
-
-```powershell
-.\OtpHarbor.IconPackBuilder-win-x64.exe build `
-  --output "C:\Packs\otp-harbor-icons.otphicons" `
-  --non-interactive `
-  --force
-```
-
-Available options:
-
-```text
---output <directory-or-file>
---offline
---refresh
---non-interactive
---force
---verbose
---cache <directory>
---mappings <directory>
---provider-preference <comma-separated provider IDs>
---rights-policy <preserve|documented-only|require-documented>
---format-version <1|2|3>
---conflict-report <path.json>
---aegis <local.zip>
---simple-icons <local.zip>
---dashboard-icons <local.zip>
-```
-
-`--offline` disables network access and requires every source to exist in the validated cache or be supplied as a local override. `--refresh` redownloads this builder release's pinned source set. `--non-interactive` never prompts, and it will not replace an existing output unless `--force` is also supplied. Normal console output is intentionally concise; `--verbose` additionally shows diagnostic report paths, per-provider statistics, selection counts, and rights-evidence totals.
-
-Format 3 is the default for current theme-aware OTP Harbor builds. Use
-`--format-version 1` or `--format-version 2` explicitly when producing a pack
-for a legacy consumer. Format 1 contains canonical normalized SVGs and no
-runtime PNG files. Format 2 is PNG-only and has one appearance per brand:
-
-```text
-OtpHarbor.IconPackBuilder build --format-version 2
-```
-
-Each format-2 brand has exactly one deterministic transparent 128 by 128
-foreground PNG and no SVG is stored in the archive. Canonical SVG normalization
-remains an internal builder quality step. A compatible consumer can decode the
-PNG off the UI thread and retain it in a bounded bitmap cache.
-See the [format v2 consumer handoff](docs/FORMAT-V2-CONSUMER-HANDOFF.md).
-
-Format 3 is produced when `--format-version` is omitted; it may also be selected
-explicitly:
-
-```text
-OtpHarbor.IconPackBuilder build --format-version 3
-```
-
-It resolves separate light- and dark-theme appearances, preserves complete
-source compositions when appropriate, uses validated native Dashboard
-variants, retains associated Aegis variations for provenance and future
-reviewed mappings, and treats Simple Icons' documented color as foreground
-paint. A transparent mark that remains clearly visible at 3:1 against OTP
-Harbor's light (`#FFFFFF`) or dark (`#10213F`) account-tile surface is emitted
-as a complete transparent icon without an extra tile; a deterministic neutral
-tile is retained only where contrast is needed. Dashboard and Aegis omitted
-fills retain SVG-default black, including intentional black interior layers.
-Reviewed monochrome source overrides may explicitly select a
-source-supported white foreground for dark theme while preserving the
-documented foreground color in light theme; these mappings are brand-specific,
-carry a rationale, and do not create a background tile. Identical appearances
-share one content-addressed PNG, so v3 does not blindly double the archive.
-Format-3 artwork is fitted inside an eight-pixel transparent safe inset so wide
-marks retain visible breathing room at list size. Reviewed badge compositions,
-such as the AdAway/AdBlock family, 2K, and .ENV, use explicit source-controlled
-mappings to preserve authentic colored badges, opaque internal details, and a
-transparent exterior; closed logo holes are never filled automatically.
-1&1, AI Dungeon, Booking.com, and The Weather Channel use explicitly reviewed square badges
-with white lettering and a thin white frame in both themes. The frame is
-included in the PNG, with sharp corners and the existing transparent inset.
-Source-painted backplates containing contrasting detail are preserved as
-complete embedded compositions without a second consumer tile. Complex
-text-free sources retain final-size pixels when a raster fallback is needed,
-avoiding a blurry 24-to-128 upscale. The reviewed 9router SVG text is checked
-against the canonical audit image, then captured at final size for its PNG. See the
-[format v3 consumer handoff](docs/FORMAT-V3-CONSUMER-HANDOFF.md).
-
-## How the catalog is created
-
-The default rights policy is preserve: it keeps deterministic visual selection
-and records the selected asset's evidence status. The documented-only policy
-excludes source records without asset-level license evidence before selection.
-The require-documented policy keeps normal selection but stops if a selected
-asset lacks that evidence. These are evidence filters, not legal opinions:
-metadata can be incomplete, a copyright license may not grant trademark rights,
-and a documented license may still impose conditions.
-
-The three upstream catalogs are merged into one deterministic set of canonical brands. Matching uses issuer aliases, not account names. Exact and explicitly mapped identities are preferred; ambiguous aliases are excluded instead of being assigned to the wrong brand.
-
-For PNG-only formats, source records are statically validated and ranked before
-full normalization and runtime rendering. Only the selected candidate consumes
-the bounded raster work unless it fails and the deterministic fallback must be
-tried. Dashboard Icons is the default first provider, followed by Aegis and
-Simple Icons; explicit source overrides remain authoritative.
-
-Every selected SVG is converted to a restricted, safe representation and
-compared with its source at the target tile size. Untrusted SVGs may be rendered
-only after static safety validation through the bounded in-process
-normalization/verification pipeline, with executable content and external
-resource loading disabled. When v2 is selected, that pipeline renders the
-internal canonical SVG and verifies the packaged PNG against it. For v3, the
-selected statically validated source appearance is materialized into its
-resolved paint profile and rendered once at the final 128-pixel geometry; the
-exact RGBA is deterministically encoded, reopened, and compared byte-for-pixel
-while the normalized SVG remains an internal structural and semantic audit
-artifact. Both theme appearances are verified independently and byte-identical
-assets are deduplicated by SHA-256. The internal SVG is discarded before PNG-only packaging. A pack is written only when the
-complete catalog passes these gates. The output contains exact upstream
-revisions, source hashes, selected-icon provenance, and the license, credit,
-disclaimer, README, or trademark documents recognized in the pinned source
-snapshots.
-
-The `.otphicons` container format is documented in [Icon pack format](docs/ICON-PACK-FORMAT.md).
-
-Release coverage and remaining portability work are tracked on the
-[product agenda](docs/PRODUCT-AGENDA.md).
+The pack and its visual and rights reports stay on your computer. No account data, issuer data, or generated pack is uploaded. Available notices and provenance are stored in the pack; read the legal notice below before distributing or using third-party marks.
 
 ## Legal and distribution notice
 

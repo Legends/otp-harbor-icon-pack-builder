@@ -113,8 +113,11 @@ public sealed class PackTests
         Assert.Matches("^runtime/appearance-128/[a-f0-9]{64}\\.png$", light.Asset.Path);
         Assert.Equal(light.Asset.Sha256, DeterministicPng.Sha256(read.Files[light.Asset.Path]));
         Assert.Equal("otp-harbor-themed-appearance-v1", light.Asset.RenderProfile);
-        Assert.Equal("foreground", light.AssetRole);
-        Assert.Equal("solid", light.Background.Mode);
+        Assert.Equal("complete-icon", light.AssetRole);
+        Assert.Equal("embedded", light.Background.Mode);
+        Assert.Equal("foreground", dark.AssetRole);
+        Assert.Equal("solid", dark.Background.Mode);
+        Assert.Equal("#FFFFFF", dark.Background.Color);
         Assert.Single(read.Files.Keys, path => path.EndsWith(".png", StringComparison.Ordinal));
         Assert.DoesNotContain(read.Files.Keys, path => path.EndsWith(".svg", StringComparison.OrdinalIgnoreCase));
     }

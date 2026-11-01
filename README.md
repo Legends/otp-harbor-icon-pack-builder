@@ -108,6 +108,12 @@ on Windows and Linux, quietly yields while total system CPU load remains above
 the configured target zone. This keeps the one-time build responsive without
 changing its deterministic output.
 
+The performance goal is the fastest practical first run with a responsive
+computer and faithful icons. There is no fixed one-minute deadline. Image
+quality and complete validation take priority over meeting a time limit;
+download speed, hardware, and other running applications affect completion
+time. Cached-source measurements exclude the initial download cost.
+
 No account data, issuer data, or generated pack is uploaded by this tool. The generated pack and reports remain on your computer.
 
 ## Command-line use
@@ -184,10 +190,12 @@ It resolves separate light- and dark-theme appearances, preserves complete
 source compositions when appropriate, uses validated native Dashboard
 variants, retains associated Aegis variations for provenance and future
 reviewed mappings, and treats Simple Icons' documented color as foreground
-paint. A transparent Simple Icons mark that remains clearly visible on the
-current theme surface is emitted as a complete transparent icon without an
-extra tile; a deterministic neutral tile is retained only where contrast is
-needed. Reviewed monochrome source overrides may explicitly select a
+paint. A transparent mark that remains clearly visible at 3:1 against OTP
+Harbor's light (`#FFFFFF`) or dark (`#10213F`) account-tile surface is emitted
+as a complete transparent icon without an extra tile; a deterministic neutral
+tile is retained only where contrast is needed. Dashboard and Aegis omitted
+fills retain SVG-default black, including intentional black interior layers.
+Reviewed monochrome source overrides may explicitly select a
 source-supported white foreground for dark theme while preserving the
 documented foreground color in light theme; these mappings are brand-specific,
 carry a rationale, and do not create a background tile. Identical appearances
@@ -197,11 +205,14 @@ marks retain visible breathing room at list size. Reviewed badge compositions,
 such as the AdAway/AdBlock family, 2K, and .ENV, use explicit source-controlled
 mappings to preserve authentic colored badges, opaque internal details, and a
 transparent exterior; closed logo holes are never filled automatically.
+1&1, AI Dungeon, Booking.com, and The Weather Channel use explicitly reviewed square badges
+with white lettering and a thin white frame in both themes. The frame is
+included in the PNG, with sharp corners and the existing transparent inset.
 Source-painted backplates containing contrasting detail are preserved as
 complete embedded compositions without a second consumer tile. Complex
-text-free sources retain final-size canonical pixels when a raster fallback is
-needed, avoiding a blurry 24-to-128 upscale; SVG text stays on the deterministic
-canonical raster path. See the
+text-free sources retain final-size pixels when a raster fallback is needed,
+avoiding a blurry 24-to-128 upscale. The reviewed 9router SVG text is checked
+against the canonical audit image, then captured at final size for its PNG. See the
 [format v3 consumer handoff](docs/FORMAT-V3-CONSUMER-HANDOFF.md).
 
 ## How the catalog is created

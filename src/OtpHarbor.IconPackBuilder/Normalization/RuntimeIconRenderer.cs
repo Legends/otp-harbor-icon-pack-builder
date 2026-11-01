@@ -11,6 +11,9 @@ public sealed record RuntimeIconRenderResult(byte[] Png, string Sha256, SvgVisua
 public static class RuntimeIconRenderer
 {
     private static readonly string[] NeutralBackgrounds = ["#FFFFFF", "#000000", "#767676", "#334155"];
+    public const string LightThemeSurface = "#FFFFFF";
+    public const string DarkThemeSurface = "#10213F";
+    public const double MinimumThemeSurfaceContrastRatio = 3.0;
     public const int Width = 128;
     public const int Height = 128;
     public const int MaximumDecodedBytes = Width * Height * 4;
@@ -18,6 +21,8 @@ public static class RuntimeIconRenderer
     public const string RenderProfile = "otp-harbor-foreground-v1";
     public const string ThemeRenderProfile = "otp-harbor-themed-appearance-v1";
     public const string EnclosedMatteComposition = "enclosed-transparent-matte";
+    public const string SquareFrameComposition = "square-badge-matte-frame";
+    public const int SquareFrameWidth = 4;
     public const int ThemeContentInset = 8;
 
     public static RuntimeIconRenderResult Render(
@@ -52,6 +57,9 @@ public static class RuntimeIconRenderer
     }
 
     public static bool HasUsableSurfaceContrast(string surfaceColor, byte[] runtimeRgba)
+        => HasContrastCoverage(surfaceColor, runtimeRgba, MinimumThemeSurfaceContrastRatio);
+
+    private static bool HasContrastCoverage(string surfaceColor, byte[] runtimeRgba, double minimumRatio)
     {
         ArgumentNullException.ThrowIfNull(runtimeRgba);
         if (runtimeRgba.Length != MaximumDecodedBytes)
@@ -72,9 +80,85 @@ public static class RuntimeIconRenderer
             var foregroundLuminance = RelativeLuminance(red, green, blue);
             var contrast = (Math.Max(surfaceLuminance, foregroundLuminance) + 0.05)
                 / (Math.Min(surfaceLuminance, foregroundLuminance) + 0.05);
-            if (contrast >= 1.25) contrasting++;
+            if (contrast >= minimumRatio) contrasting++;
         }
         return significant > 0 && contrasting >= Math.Ceiling(significant * 0.9);
+    }
+
+    private static bool HasBackgroundSeparation(string backgroundColor, IReadOnlyList<byte> rgba)
+    {
+        var background = ParseColor(backgroundColor);
+        for (var offset = 0; offset < rgba.Count; offset += 4)
+        {
+            if (rgba[offset + 3] < 128) continue;
+            var alpha = rgba[offset + 3] / 255d;
+            var red = (byte)Math.Round(rgba[offset] * alpha + background.Red * (1 - alpha));
+            var green = (byte)Math.Round(rgba[offset + 1] * alpha + background.Green * (1 - alpha));
+            var blue = (byte)Math.Round(rgba[offset + 2] * alpha + background.Blue * (1 - alpha));
+            if (red != background.Red || green != background.Green || blue != background.Blue) return true;
+        }
+        return false;
+    }
+
+    public static bool HasEmbeddedCompositionSilhouette(byte[] runtimeRgba)
+    {
+        ArgumentNullException.ThrowIfNull(runtimeRgba);
+        if (runtimeRgba.Length != MaximumDecodedBytes)
+            throw new ArgumentException("Runtime RGBA has an invalid byte length.", nameof(runtimeRgba));
+        var visible = new bool[Width * Height];
+        var visiblePixels = 0;
+        var opaquePixels = 0;
+        var left = Width;
+        var top = Height;
+        var right = -1;
+        var bottom = -1;
+        for (var index = 0; index < visible.Length; index++)
+        {
+            var alpha = runtimeRgba[index * 4 + 3];
+            if (alpha < 64) continue;
+            visible[index] = true;
+            visiblePixels++;
+            if (alpha >= 240) opaquePixels++;
+            var x = index % Width;
+            var y = index / Width;
+            left = Math.Min(left, x);
+            top = Math.Min(top, y);
+            right = Math.Max(right, x);
+            bottom = Math.Max(bottom, y);
+        }
+        if (visiblePixels == 0) return false;
+        var boundsArea = checked((right - left + 1) * (bottom - top + 1));
+        if (opaquePixels < boundsArea * 0.5) return false;
+
+        var visited = new bool[visible.Length];
+        var queue = new int[visible.Length];
+        var largestComponent = 0;
+        for (var start = 0; start < visible.Length; start++)
+        {
+            if (!visible[start] || visited[start]) continue;
+            var head = 0;
+            var tail = 0;
+            queue[tail++] = start;
+            visited[start] = true;
+            void Enqueue(int neighbor)
+            {
+                if (!visible[neighbor] || visited[neighbor]) return;
+                visited[neighbor] = true;
+                queue[tail++] = neighbor;
+            }
+            while (head < tail)
+            {
+                var current = queue[head++];
+                var x = current % Width;
+                var y = current / Width;
+                if (x > 0) Enqueue(current - 1);
+                if (x + 1 < Width) Enqueue(current + 1);
+                if (y > 0) Enqueue(current - Width);
+                if (y + 1 < Height) Enqueue(current + Width);
+            }
+            largestComponent = Math.Max(largestComponent, tail);
+        }
+        return largestComponent >= Math.Ceiling(visiblePixels * 0.9);
     }
 
     private static RuntimeIconRenderResult RenderCore(
@@ -145,26 +229,6 @@ public static class RuntimeIconRenderer
         return new RuntimeIconRenderResult(png, DeterministicPng.Sha256(png), metrics);
     }
 
-    private static bool HasBackgroundSeparation(string backgroundColor, IReadOnlyList<byte> rgba)
-    {
-        var background = ParseColor(backgroundColor);
-        for (var offset = 0; offset < rgba.Count; offset += 4)
-        {
-            var alphaByte = rgba[offset + 3];
-            // Ignore only fringe antialiasing here. Very low-alpha edge pixels
-            // can round differently after PNG decode and must not make an
-            // otherwise invisible foreground appear contrast-safe.
-            if (alphaByte < 128) continue;
-            var alpha = alphaByte / 255d;
-            var red = (byte)Math.Round(rgba[offset] * alpha + background.Red * (1 - alpha));
-            var green = (byte)Math.Round(rgba[offset + 1] * alpha + background.Green * (1 - alpha));
-            var blue = (byte)Math.Round(rgba[offset + 2] * alpha + background.Blue * (1 - alpha));
-            if (red != background.Red || green != background.Green || blue != background.Blue)
-                return true;
-        }
-        return false;
-    }
-
     private static double RelativeLuminance(byte red, byte green, byte blue)
     {
         static double Linear(byte component)
@@ -180,13 +244,12 @@ public static class RuntimeIconRenderer
         string matteColor,
         string previewBackgroundColor,
         string diagnostic,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string compositionMode = EnclosedMatteComposition)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        SvgNormalizer.ValidateCanonical(canonicalSvg, diagnostic);
-        var renderSvg = ApplyRuntimePaintProfile(canonicalSvg);
-        using var source = RenderCanonicalBitmap(renderSvg, ThemeContentInset);
-        using var composed = ApplyEnclosedMatte(source, ParseColor(matteColor), diagnostic, cancellationToken);
+        using var composed = CreateReviewedBadgeBitmap(canonicalSvg, matteColor,
+            diagnostic, cancellationToken, compositionMode);
         var rgba = new byte[MaximumDecodedBytes];
         var index = 0;
         foreach (var pixel in composed.Pixels)
@@ -209,11 +272,64 @@ public static class RuntimeIconRenderer
         byte[] canonicalSvg,
         string matteColor,
         string diagnostic,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string compositionMode = EnclosedMatteComposition)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        SvgNormalizer.ValidateCanonical(canonicalSvg, diagnostic);
+        if (compositionMode is not (EnclosedMatteComposition or SquareFrameComposition))
+            throw new InputValidationException($"Unsupported badge composition '{compositionMode}' for '{diagnostic}'.");
         var renderSvg = ApplyRuntimePaintProfile(canonicalSvg);
-        using var source = RenderCanonicalBitmap(renderSvg, ThemeContentInset);
-        return ApplyEnclosedMatte(source, ParseColor(matteColor), diagnostic, cancellationToken);
+        using var source = RenderCanonicalBitmap(renderSvg, ThemeContentInset
+            + (compositionMode == SquareFrameComposition ? SquareFrameWidth : 0));
+        return compositionMode == SquareFrameComposition
+            ? ApplySquareFrame(source, ParseColor(matteColor), diagnostic, cancellationToken)
+            : ApplyEnclosedMatte(source, ParseColor(matteColor), diagnostic, cancellationToken);
+    }
+
+    private static SKBitmap ApplySquareFrame(
+        SKBitmap source, SKColor matte, string diagnostic, CancellationToken cancellationToken)
+    {
+        // An explicit source mapping authorizes the matte; geometry alone never
+        // opts a logo into this operation. Reject a changed/non-square source.
+        const int edge = ThemeContentInset + SquareFrameWidth;
+        const int end = Width - edge - 1;
+        for (var position = edge; position <= end; position++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (source.GetPixel(position, edge).Alpha != 255
+                || source.GetPixel(position, end).Alpha != 255
+                || source.GetPixel(edge, position).Alpha != 255
+                || source.GetPixel(end, position).Alpha != 255)
+                throw new InputValidationException($"Reviewed square badge '{diagnostic}' must have an opaque, square outer contour.");
+        }
+        using var output = new SKBitmap(Width, Height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        var brandPixels = 0;
+        for (var y = 0; y < Height; y++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            for (var x = 0; x < Width; x++)
+            {
+                var pixel = source.GetPixel(x, y);
+                if ((x < edge || x > end || y < edge || y > end) && pixel.Alpha != 0)
+                    throw new InputValidationException($"Reviewed square badge '{diagnostic}' has artwork outside its square contour.");
+                if (x < ThemeContentInset || x >= Width - ThemeContentInset
+                    || y < ThemeContentInset || y >= Height - ThemeContentInset)
+                {
+                    output.SetPixel(x, y, SKColors.Transparent);
+                    continue;
+                }
+                var alpha = pixel.Alpha / 255d;
+                output.SetPixel(x, y, new SKColor(
+                    (byte)Math.Round(pixel.Red * alpha + matte.Red * (1 - alpha)),
+                    (byte)Math.Round(pixel.Green * alpha + matte.Green * (1 - alpha)),
+                    (byte)Math.Round(pixel.Blue * alpha + matte.Blue * (1 - alpha)), 255));
+                if (pixel.Alpha == 255 && pixel != matte) brandPixels++;
+            }
+        }
+        if (brandPixels == 0)
+            throw new InputValidationException($"Reviewed square badge '{diagnostic}' contains no distinct opaque brand artwork.");
+        return output.Copy();
     }
 
     private static SKBitmap RenderCanonicalBitmap(byte[] svg, int contentInset)

@@ -145,10 +145,11 @@ internal static class SvgVisualVerifier
         byte[] canonicalSvg,
         byte[] runtimePng,
         string matteColor,
-        string previewBackgroundColor)
+        string previewBackgroundColor,
+        string compositionMode = RuntimeIconRenderer.EnclosedMatteComposition)
     {
         using var expected = RuntimeIconRenderer.CreateReviewedBadgeBitmap(
-            canonicalSvg, matteColor, "reviewed badge visual verification");
+            canonicalSvg, matteColor, "reviewed badge visual verification", compositionMode: compositionMode);
         using var runtime = DeterministicPng.DecodeAndValidate(runtimePng,
             RuntimeIconRenderer.Width, RuntimeIconRenderer.Height, "reviewed badge runtime visual verification");
         if (!HasVisiblePixel(expected) || !HasVisiblePixel(runtime))

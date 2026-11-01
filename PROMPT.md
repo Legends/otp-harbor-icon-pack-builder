@@ -652,13 +652,19 @@ If the materialized mark is sufficiently visible on the application theme
 surface, emit it as a transparent `complete-icon` without an extra tile. When
 it is not sufficiently visible, retain it on a deterministic contrasting tile
 rather than altering the mark. Contrast selection must reject backgrounds that
-hide any retained foreground paint.
+hide any retained foreground paint. Evaluate theme visibility against the
+current OTP Harbor list-tile surfaces (`#FFFFFF` for light theme and `#10213F`
+for dark theme), requiring at least 3:1 contrast for at least 90 percent of
+nearly opaque pixels.
 
-A source composition with a large source-painted backplate geometrically
-containing later contrasting detail is a `complete-icon` and must not be split
-or double-backed. The builder preserves that paint; it does not synthesize a
-generic tile or infer a matte from transparent holes. Adjacent multicolor marks
-remain transparent artwork. Both themes pass canonical structural/semantic
+A source composition with a dense, predominantly connected source-painted
+silhouette and multiple retained paints is a `complete-icon` and must not be
+split or double-backed. The builder preserves that paint; it does not
+synthesize a generic tile or infer a matte from transparent holes. Sparse
+wordmarks and disconnected adjacent multicolor marks remain foreground
+artwork. SVG-default black in Dashboard and Aegis sources must be materialized
+before this classification so omitted fills cannot erase authentic black
+interior layers. Both themes pass canonical structural/semantic
 validation plus exact selected-source-RGBA-to-packaged-PNG verification at the
 documented 40 by 40 tile / 24 by 24 content semantics. Ambiguous outcomes
 require actionable diagnostics and an explicit mapping/source override; they
@@ -672,12 +678,21 @@ not a packaged or consumer-facing asset.
 
 When reviewed source evidence establishes that a monochrome badge source uses
 transparent enclosed regions to represent intended opaque details, v3 may
-apply an explicit `appearance-compositions.json` mapping. The transform must
-preserve the declared brand paint, apply the declared matte only inside the
+apply an explicit `appearance-compositions.json` mapping. The enclosed-matte
+transform must preserve the declared brand paint, apply the declared matte only inside the
 reviewed badge, retain transparent antialiased exterior pixels, and emit
 `complete-icon`/`embedded` with selection `reviewed-badge-composition`. Never
 infer this operation from enclosed geometry alone: holes and counters in
 ordinary logos must remain transparent.
+
+The explicitly reviewed `square-badge-matte-frame` mapping mode is limited to
+1&1, AI Dungeon, Booking.com, and The Weather Channel. It fits their source square into a
+104-pixel square, composites white interior details, and adds a four-pixel
+square white frame inside the existing eight-pixel transparent inset. Preserve
+source brand paint and reject changed non-square geometry. The frame is builder
+presentation, not claimed official artwork. Emit the same complete embedded
+PNG for both themes; no consumer frame, rounding, tile, or extra padding is
+required. This builder mapping mode is not a manifest enum or render profile.
 
 # Default output location
 
@@ -798,6 +813,16 @@ In `--non-interactive` mode:
 Keep the behavior deterministic and script-friendly.
 
 # Interactive console experience
+
+Build as fast as practical while maximizing the overall user experience.
+The earlier under-one-minute requirement is superseded; there is no hard
+duration deadline. Preserve visual fidelity, full security/visual validation,
+determinism, useful progress, cancellation, bounded memory, and responsive
+desktop use. Keep conservative concurrency and adaptive throttling around a
+70 percent total-system CPU target, acknowledging that other applications and
+sampling intervals prevent a hard global CPU guarantee. Evaluate first-run
+download and processing costs separately, and label cached-source measurements
+honestly. Do not trade correctness or image quality for a stopwatch target.
 
 Use an ASCII-only in-place progress spinner and bar so the display remains
 readable in legacy Windows consoles and Visual Studio external consoles. Show

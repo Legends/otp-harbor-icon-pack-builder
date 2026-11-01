@@ -33,7 +33,8 @@ public static partial class SvgNormalizer
         string? implicitFillColor = null,
         bool preferHighResolutionRasterFallback = false,
         bool recognizeEmbeddedComposition = false,
-        bool useRuntimeVisualProfile = false)
+        bool useRuntimeVisualProfile = false,
+        bool preferFinalSizeTextRaster = false)
     {
         ArgumentNullException.ThrowIfNull(input);
         if (input.Length is 0 or > MaximumSvgBytes)
@@ -204,6 +205,14 @@ public static partial class SvgNormalizer
         }
         if (!visualMetrics.Resolved)
             throw new InputValidationException($"SVG visual verification remained unresolved (mean difference {visualMetrics.MeanAbsoluteChannelDifference}, material pixels {visualMetrics.MateriallyDifferentPixels}).");
+        if (useRuntimeVisualProfile && preferHighResolutionRasterFallback && containsText
+            && preferFinalSizeTextRaster)
+        {
+            // Preserve the source-to-canonical audit above, then capture text at
+            // its final display size. Upscaling a 24 px font raster blurs glyphs.
+            runtimeRgba = SvgVisualVerifier.RenderRuntimeRgba(input, RuntimeIconRenderer.ThemeContentInset);
+            operations.Add("runtime-text-rasterized-at-128px");
+        }
         if (normalizedBytes.Length > MaximumSvgBytes)
             throw new InputValidationException("Visually normalized SVG exceeds the 1 MiB format limit.");
         return new SvgNormalizationResult(normalizedBytes, normalizedBackground, operations.ToArray(), foregroundColors,

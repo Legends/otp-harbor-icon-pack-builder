@@ -1,6 +1,34 @@
 {
   "version": 1,
   "compositions": {
+    "1-1": {
+      "provider": "simple-icons",
+      "sourceId": "1and1",
+      "mode": "square-badge-matte-frame",
+      "matteColor": "#FFFFFF",
+      "rationale": "Reviewed square badge: Simple Icons 1and1 defines a full square with 1&1 lettering cutouts. Preserve its documented blue paint and render the lettering over white. Add the requested thin square white contrast frame for dark surfaces; this frame is builder presentation, not claimed official artwork."
+    },
+    "ai-dungeon": {
+      "provider": "simple-icons",
+      "sourceId": "aidungeon",
+      "mode": "square-badge-matte-frame",
+      "matteColor": "#FFFFFF",
+      "rationale": "Reviewed square badge: Simple Icons aidungeon defines a full square with logo and lettering cutouts. Preserve its documented black paint and render the interior details over white. Add the requested thin square white contrast frame for dark surfaces; this frame is builder presentation, not claimed official artwork."
+    },
+    "booking-com": {
+      "provider": "simple-icons",
+      "sourceId": "bookingdotcom",
+      "mode": "square-badge-matte-frame",
+      "matteColor": "#FFFFFF",
+      "rationale": "Reviewed square badge: Simple Icons bookingdotcom defines a full square with B. cutouts. Preserve its documented blue paint and the existing white-letter presentation. Add a thin square white contrast frame requested for dark surfaces; this frame is builder presentation, not claimed official artwork."
+    },
+    "the-weather-channel": {
+      "provider": "simple-icons",
+      "sourceId": "theweatherchannel",
+      "mode": "square-badge-matte-frame",
+      "matteColor": "#FFFFFF",
+      "rationale": "Reviewed square badge: Simple Icons theweatherchannel defines a full square with wordmark cutouts. Preserve its documented blue paint and the existing white-letter presentation. Add a thin square white contrast frame requested for dark surfaces; this frame is builder presentation, not claimed official artwork."
+    },
     "adaway": {
       "provider": "simple-icons",
       "sourceId": "adaway",

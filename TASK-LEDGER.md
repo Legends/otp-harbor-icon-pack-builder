@@ -1,5 +1,87 @@
 # Format v3 themed-appearance implementation ledger
 
+## v3.0.1 — crisp 9router runtime artwork (2026-11-01)
+
+- **DONE** — Pinned Dashboard Icons `svg/9router.svg` uses SVG text. Its old
+  format-3 PNG enlarged a 24-pixel font raster, creating visibly soft lettering
+  and scaling bands. A first attempt to capture all text sources at final size
+  made Sonarr DV vary across builds. The correction is now scoped to 9router:
+  its existing source-to-canonical audit remains, and its PNG uses final-size
+  source pixels. Other text sources and frozen formats 1/2 remain unchanged.
+- **DONE** — Synthetic regression verifies packaged text pixels equal the
+  final-size source rendering. The full production pack reopens with zero
+  unresolved visual failures; the 9router before/after image was inspected.
+- **DONE** — Version bumped to 3.0.1. Release build has zero warnings/errors,
+  196 tests pass, and the complete v3 pack reopens with no unresolved visuals.
+  See `docs/9ROUTER-V3.0.1-VERIFICATION.md` for the reproducibility and
+  distribution record.
+
+## Additional square badges (2026-11-01)
+
+- **DONE** — Apply the existing reviewed square white matte/frame to
+  1&1 (`simple-icons/1and1`) and AI Dungeon (`simple-icons/aidungeon`). Preserve
+  their blue/black paint, white interior details, sharp corners, and inset.
+- **DONE** — Release build and 195 tests pass, including both actual embedded
+  mappings exercised with synthetic geometry, round trips, and determinism.
+- **DONE** — Two full builds and reports are byte-identical, with 5,745 brands
+  and zero unresolved visual failures. Packaged-pixel audit and light/dark
+  preview pass. Only the 1&1 and AI Dungeon brand descriptors changed from the
+  previous square-badge pack. Updated Downloads artifact and consumer handoff;
+  see `docs/SQUARE-BADGE-VERIFICATION.md` for current hashes and evidence.
+
+## Square badge frame (2026-10-31)
+
+- **DONE** — Add an explicitly reviewed square matte/frame composition
+  for Booking.com and The Weather Channel, preserving brand colors and opaque
+  white lettering with sharp outer corners and the existing transparent inset.
+- **DONE** — Synthetic pixel, invalid geometry/mapping, cancellation, round-trip,
+  determinism, and v1/v2 compatibility tests; 193 tests pass. Two full catalog
+  builds and their reports are byte-identical, with 5,745 brands, 11,490
+  appearances, and zero unresolved visual failures. Light/dark previews were
+  inspected at 128 px and 26 px. Verification completed 2026-11-01; see
+  `docs/SQUARE-BADGE-VERIFICATION.md` for artifact paths and hashes.
+- **DONE** — Document builder-only mapping mode and consumer verification in
+  `docs/SQUARE-BADGE-CONSUMER-TRANSFER.md`. The two badges now fit source artwork
+  inside a four-pixel frame; outer inset remains eight pixels. No manifest
+  field, enum, profile, or consumer implementation change. Device acceptance
+  remains separate, unverified consumer work.
+
+## Performance acceptance policy (2026-10-31)
+
+- **DONE** — User supersedes the under-one-minute deadline with the fastest
+  practical build and best overall user experience. Documented in AGENTS.md,
+  PROMPT.md, and README.md.
+- **DONE** — Retain cooperative CPU throttling around 70 percent system load,
+  responsive progress/cancellation, image fidelity, padding, deterministic
+  output, and complete validation. Cached-source timings are not cold-start
+  performance claims. No pack or consumer contract change from this policy.
+
+## Dark-theme visibility and SVG-default paint correction (2026-10-30)
+
+1. **DONE** — Format-3 visibility is evaluated against OTP Harbor's actual
+   light `#FFFFFF` and dark account-card `#10213F` surfaces with a 3:1 threshold
+   covering at least 90 percent of nearly opaque artwork pixels.
+2. **DONE** — Low-contrast transparent marks retain authentic provider paint
+   on a deterministic white tile in dark theme. Sparse multicolor wordmarks are
+   no longer misclassified as complete embedded backplates.
+3. **DONE** — Dashboard and Aegis omitted fills are materialized as SVG-default
+   black before V3 runtime capture. Bazarr therefore retains its black/white
+   interior composition instead of collapsing to a white circle.
+4. **DONE** — Backplate recognition reuses the existing bounded RGBA through a
+   dense, predominantly connected silhouette check and performs no second
+   source render. Native variants are judged using rendered pixels, not a
+   hex-string prefilter that could miss implicit or named source colors.
+5. **DONE** — Release build and 181 tests pass; two complete 5,745-brand builds
+   produce identical packs/reports, with 11,490 appearances, 6,083 unique PNGs,
+   and zero unresolved visual failures. Final Downloads artifact: 48,049,868
+   bytes. Hashes, preview inspection, and limits of verification are recorded
+   in `docs/DARK-THEME-VISIBILITY-VERIFICATION.md`. No generated artwork is
+   tracked or published. Android reimport/theme acceptance remains unverified.
+6. **DONE** — V1/V2 layouts and the V3 consumer contract are unchanged; this is
+   a builder-side appearance-selection and source-paint correction. Added
+   `docs/DARK-THEME-VISIBILITY-CONSUMER-TRANSFER.md` for device acceptance;
+   no consumer code change is expected and semantic pixel checks stay here.
+
 ## Format v3 default (2026-10-30)
 
 1. **DONE** — Omitting `--format-version` now produces strict format 3.

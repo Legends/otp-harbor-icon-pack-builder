@@ -314,17 +314,19 @@ public sealed class SvgNormalizerTests
     }
 
     [Fact]
-    public void VersionThreeTextSourceNeverUsesFinalSizeRuntimeRaster()
+    public void VersionThreeTextSourceUsesFinalSizeRuntimeRasterAfterCanonicalAudit()
     {
         var normalized = SvgNormalizer.Normalize(Encoding.UTF8.GetBytes("""
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
               <rect width="64" height="64" rx="12" fill="#605DFF"/>
               <text x="32" y="48" font-family="Inter, sans-serif" font-size="46" text-anchor="middle" fill="#F43098">X</text>
             </svg>
-            """), "#FFFFFF", preferHighResolutionRasterFallback: true);
+            """), "#FFFFFF", preferHighResolutionRasterFallback: true,
+            useRuntimeVisualProfile: true, preferFinalSizeTextRaster: true);
 
-        Assert.DoesNotContain("runtime-rasterized-at-128px", normalized.Operations);
-        Assert.Null(normalized.RuntimeRgba);
+        Assert.Contains("runtime-text-rasterized-at-128px", normalized.Operations);
+        Assert.NotNull(normalized.RuntimeRgba);
+        Assert.Equal(RuntimeIconRenderer.MaximumDecodedBytes, normalized.RuntimeRgba!.Length);
         Assert.True(normalized.VisualMetrics.Resolved);
     }
 

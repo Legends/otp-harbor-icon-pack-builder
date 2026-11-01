@@ -421,6 +421,41 @@ public sealed class MergeTests
     }
 
     [Fact]
+    public void VersionThreeUsesContrastingTileForDarkBrandPaintOnActualDarkCardSurface()
+    {
+        var record = RecordWithColors("simple-icons", "dark-blue", "Dark Blue", "#003D8F", null);
+
+        var result = new BrandMerger().Merge([TestData.Catalog("simple-icons", record)],
+            MappingSet.Empty, formatVersion: 3);
+        var appearances = Assert.Single(result.Document.Brands).Appearances!;
+
+        Assert.Equal("complete-icon", appearances.LightTheme.AssetRole);
+        Assert.Equal("embedded", appearances.LightTheme.Background.Mode);
+        Assert.Equal("foreground", appearances.DarkTheme.AssetRole);
+        Assert.Equal("solid", appearances.DarkTheme.Background.Mode);
+        Assert.Equal("#FFFFFF", appearances.DarkTheme.Background.Color);
+    }
+
+    [Fact]
+    public void VersionThreeDoesNotMistakeAdjacentMulticolorWordmarkForEmbeddedBackplate()
+    {
+        var record = RecordWithSvg("dashboard-icons", "wordmark", "Wordmark", """
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+              <path d="M1 8h16v8H1z" fill="#012169"/>
+              <path d="M18 8h5v8h-5z" fill="#E97200"/>
+            </svg>
+            """);
+
+        var result = new BrandMerger().Merge([TestData.Catalog("dashboard-icons", record)],
+            MappingSet.Empty, formatVersion: 3);
+        var appearance = Assert.Single(result.Document.Brands).Appearances!.DarkTheme;
+
+        Assert.Equal("foreground", appearance.AssetRole);
+        Assert.Equal("solid", appearance.Background.Mode);
+        Assert.Equal("#FFFFFF", appearance.Background.Color);
+    }
+
+    [Fact]
     public void VersionThreeKeepsTileOnlyWhereMonochromeBrandPaintNeedsContrast()
     {
         var record = RecordWithColors("simple-icons", "white-mark", "White Mark", "#FFFFFF", null);
@@ -534,6 +569,34 @@ public sealed class MergeTests
     }
 
     [Fact]
+    public void VersionThreePreservesDashboardSvgDefaultBlackInsideCompleteComposition()
+    {
+        var record = RecordWithSvg("dashboard-icons", "media-badge", "Media Badge", """
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="11" fill="#FFFFFF"/>
+              <rect x="5" y="6" width="14" height="12"/>
+              <path d="M8 10h8v2H8z" fill="#FFFFFF"/>
+            </svg>
+            """);
+
+        var result = new BrandMerger().Merge([TestData.Catalog("dashboard-icons", record)],
+            MappingSet.Empty, formatVersion: 3);
+        var appearances = Assert.Single(result.Document.Brands).Appearances!;
+
+        foreach (var appearance in new[] { appearances.LightTheme, appearances.DarkTheme })
+        {
+            Assert.Equal("complete-icon", appearance.AssetRole);
+            Assert.Equal("embedded", appearance.Background.Mode);
+            using var bitmap = DeterministicPng.DecodeAndValidate(
+                result.RuntimeIcons![appearance.Asset.Path], 128, 128, appearance.Asset.Path);
+            Assert.Contains(bitmap.Pixels, pixel => pixel.Alpha == 255
+                && pixel.Red < 10 && pixel.Green < 10 && pixel.Blue < 10);
+            Assert.Contains(bitmap.Pixels, pixel => pixel.Alpha == 255
+                && pixel.Red > 245 && pixel.Green > 245 && pixel.Blue > 245);
+        }
+    }
+
+    [Fact]
     public void VersionTwoPromotesAegisImplicitBlackToRuntimeBackground()
     {
         var record = RecordWithSvg("aegis", "OpenAI", "OpenAI", """
@@ -575,8 +638,12 @@ public sealed class MergeTests
         Assert.Equal("example-light", appearances.DarkTheme.Source.SourceId);
         Assert.Equal("native-theme-variant", appearances.LightTheme.Selection);
         Assert.Equal("native-theme-variant", appearances.DarkTheme.Selection);
-        Assert.Equal("#FFFFFF", appearances.LightTheme.Background.Color);
-        Assert.Equal("#121212", appearances.DarkTheme.Background.Color);
+        Assert.All(new[] { appearances.LightTheme, appearances.DarkTheme }, appearance =>
+        {
+            Assert.Equal("complete-icon", appearance.AssetRole);
+            Assert.Equal("embedded", appearance.Background.Mode);
+            Assert.Null(appearance.Background.Color);
+        });
     }
 
     [Fact]
@@ -756,13 +823,15 @@ public sealed class MergeTests
         });
     }
 
-    [Fact]
-    public void AppearanceCompositionOverridesDoNotChangeVersionOneOrTwo()
+    [Theory]
+    [InlineData(RuntimeIconRenderer.EnclosedMatteComposition)]
+    [InlineData(RuntimeIconRenderer.SquareFrameComposition)]
+    public void AppearanceCompositionOverridesDoNotChangeVersionOneOrTwo(string mode)
     {
         var record = RecordWithColors("simple-icons", "example", "Example", "#C70D2C", null);
         var composition = new Dictionary<string, AppearanceCompositionOverride>(StringComparer.Ordinal)
         {
-            ["example"] = new("simple-icons", "example", RuntimeIconRenderer.EnclosedMatteComposition,
+            ["example"] = new("simple-icons", "example", mode,
                 "#FFFFFF", "Reviewed fixture.")
         };
         var baseline = MappingSet.Empty;
@@ -775,6 +844,40 @@ public sealed class MergeTests
         var v2Baseline = new BrandMerger().Merge([TestData.Catalog("simple-icons", record)], baseline, formatVersion: 2);
         var v2Reviewed = new BrandMerger().Merge([TestData.Catalog("simple-icons", record)], reviewed, formatVersion: 2);
         Assert.Equal(v2Baseline.RuntimeIcons!.Single().Value, v2Reviewed.RuntimeIcons!.Single().Value);
+    }
+
+    [Fact]
+    public void VersionThreeTextArtworkUsesFinalSizePixelsWithoutEnlargingTheCanonicalFallback()
+    {
+        var source = System.Text.Encoding.UTF8.GetBytes("""
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+              <rect width="192" height="192" rx="24" fill="#0a0a0a"/>
+              <text x="96" y="120" font-family="Arial, sans-serif" font-size="80"
+                    font-weight="bold" fill="#ffffff" text-anchor="middle">9R</text>
+            </svg>
+            """);
+        var record = new SourceRecord("dashboard-icons", "9router", "9router",
+            ["9router"], "svg/9router.svg", source, "default",
+            new SortedDictionary<string, string?>(StringComparer.Ordinal));
+        var result = new BrandMerger().Merge([TestData.Catalog("dashboard-icons", record)],
+            MappingSet.Empty, formatVersion: 3);
+        var reference = Assert.Single(result.RuntimeVisualReferences!, item => item.Appearance == "lightTheme");
+        var appearance = Assert.Single(result.Document.Brands).Appearances!.LightTheme;
+        using var decoded = DeterministicPng.DecodeAndValidate(
+            result.RuntimeIcons![appearance.Asset.Path], 128, 128, "synthetic text badge");
+        var sourcePixels = SvgVisualVerifier.RenderRuntimeRgba(source, RuntimeIconRenderer.ThemeContentInset);
+        var offset = 0;
+        foreach (var pixel in decoded.Pixels)
+        {
+            Assert.Equal(sourcePixels[offset++], pixel.Red);
+            Assert.Equal(sourcePixels[offset++], pixel.Green);
+            Assert.Equal(sourcePixels[offset++], pixel.Blue);
+            Assert.Equal(sourcePixels[offset++], pixel.Alpha);
+        }
+        Assert.Equal(source, reference.SourceSvg);
+        var legacy = SvgNormalizer.Normalize(source, "#FFFFFF", preferHighResolutionRasterFallback: true);
+        Assert.Null(legacy.RuntimeRgba);
+        Assert.True(legacy.VisualMetrics.Resolved);
     }
 
     [Fact]

@@ -12,7 +12,16 @@ public sealed class MappingTests
         Assert.NotEmpty(mappings.CanonicalBrands);
         Assert.NotEmpty(mappings.SourceOverrides);
         Assert.NotNull(mappings.EffectiveRightsOverrides);
-        Assert.Equal(5, mappings.EffectiveAppearanceCompositions.Count);
+        Assert.Equal(9, mappings.EffectiveAppearanceCompositions.Count);
+        Assert.Equal(RuntimeIconRenderer.SquareFrameComposition,
+            mappings.EffectiveAppearanceCompositions["1-1"].Mode);
+        Assert.Equal("1and1", mappings.EffectiveAppearanceCompositions["1-1"].SourceId);
+        Assert.Equal(RuntimeIconRenderer.SquareFrameComposition,
+            mappings.EffectiveAppearanceCompositions["ai-dungeon"].Mode);
+        Assert.Equal("aidungeon", mappings.EffectiveAppearanceCompositions["ai-dungeon"].SourceId);
+        Assert.Equal(RuntimeIconRenderer.SquareFrameComposition,
+            mappings.EffectiveAppearanceCompositions["booking-com"].Mode);
+        Assert.Equal("theweatherchannel", mappings.EffectiveAppearanceCompositions["the-weather-channel"].SourceId);
         Assert.Equal(RuntimeIconRenderer.EnclosedMatteComposition,
             mappings.EffectiveAppearanceCompositions["adaway"].Mode);
         Assert.Equal("2k", mappings.EffectiveAppearanceCompositions["2k"].SourceId);
@@ -147,6 +156,37 @@ public sealed class MappingTests
         var assessment = Assert.Single(mappings.EffectiveRightsOverrides).Value;
         Assert.Equal(RightsStatus.AttributionRequired, assessment.Status);
         Assert.Equal("CC-BY-4.0", assessment.LicenseType);
+    }
+
+    [Theory]
+    [InlineData(RuntimeIconRenderer.SquareFrameComposition, "#FFFFFF", "Reviewed square frame.", true)]
+    [InlineData("unreviewed-frame", "#FFFFFF", "Reviewed square frame.", false)]
+    [InlineData(RuntimeIconRenderer.SquareFrameComposition, "white", "Reviewed square frame.", false)]
+    [InlineData(RuntimeIconRenderer.SquareFrameComposition, "#FFFFFF", "", false)]
+    public async Task SquareFrameMappingRequiresKnownModeColorAndRationale(
+        string mode, string matteColor, string rationale, bool valid)
+    {
+        using var fixture = new TestArchive(new Dictionary<string, string> { ["placeholder"] = "x" });
+        var directory = fixture.DirectoryPath;
+        await File.WriteAllTextAsync(Path.Combine(directory, "canonical-brands.json"), "{\"version\":1,\"brands\":[]}");
+        await File.WriteAllTextAsync(Path.Combine(directory, "issuer-aliases.json"), "{\"version\":1,\"aliases\":{}}");
+        await File.WriteAllTextAsync(Path.Combine(directory, "source-overrides.json"), "{\"version\":1,\"overrides\":{}}");
+        await File.WriteAllTextAsync(Path.Combine(directory, "appearance-compositions.json"),
+            System.Text.Json.JsonSerializer.Serialize(new
+            {
+                version = 1,
+                compositions = new
+                {
+                    square = new { provider = "simple-icons", sourceId = "square", mode, matteColor, rationale }
+                }
+            }));
+        if (valid)
+        {
+            var loaded = await MappingLoader.LoadAsync(directory);
+            Assert.Equal(mode, loaded.EffectiveAppearanceCompositions["square"].Mode);
+        }
+        else
+            await Assert.ThrowsAsync<InputValidationException>(() => MappingLoader.LoadAsync(directory));
     }
 
     internal static string FindRepositoryDirectory(string child, string expectedFile)

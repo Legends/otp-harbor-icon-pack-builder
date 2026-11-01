@@ -524,13 +524,17 @@ public sealed class BrandMerger
                 var svg = candidate.Variant?.Svg ?? record.Svg;
                 var sourceId = candidate.Variant?.SourceId ?? record.SourceId;
                 var assetPath = candidate.Variant?.AssetPath ?? record.AssetPath;
-                var themeSurface = theme == "lightTheme" ? "#FFFFFF" : "#121212";
+                var themeSurface = theme == "lightTheme"
+                    ? RuntimeIconRenderer.LightThemeSurface
+                    : RuntimeIconRenderer.DarkThemeSurface;
                 // Preserve unpaired artwork on a neutral light tile in either
                 // app theme. Only a provider-supplied dark-theme appearance is
                 // presumed suitable for a dark tile. This favors authentic
                 // source paint over automatic dark-mode recoloring.
                 var preferredBackground = explicitBackground
-                    ?? (theme == "darkTheme" && candidate.Variant is not null ? "#121212" : "#FFFFFF");
+                    ?? (theme == "darkTheme" && candidate.Variant is not null
+                        ? RuntimeIconRenderer.DarkThemeSurface
+                        : RuntimeIconRenderer.LightThemeSurface);
                 var reviewedThemeColor = theme == "lightTheme"
                     ? sourceOverride?.LightForegroundColor
                     : sourceOverride?.DarkForegroundColor;
@@ -542,22 +546,37 @@ public sealed class BrandMerger
                     ? svg
                     : SvgNormalizer.MaterializeInheritedFill(svg, implicitColor,
                         $"{record.Provider}/{sourceId} for '{brandId}' ({theme})");
+                var materializeSvgDefaultBlack = record.Provider.Equals("aegis", StringComparison.OrdinalIgnoreCase)
+                    || record.Provider.Equals("dashboard-icons", StringComparison.OrdinalIgnoreCase);
                 var normalized = workCache.Normalize(visualSourceSvg, preferredBackground,
-                    materializeImplicitBlackFill: record.Provider.Equals("aegis", StringComparison.OrdinalIgnoreCase),
+                    materializeImplicitBlackFill: materializeSvgDefaultBlack,
                     preserveEmbeddedBackground: true,
                     implicitFillColor: implicitColor,
                     preferHighResolutionRasterFallback: true,
-                    useRuntimeVisualProfile: true);
+                    useRuntimeVisualProfile: true,
+                    preferFinalSizeTextRaster: record.Provider == "dashboard-icons"
+                        && sourceId == "9router" && candidate.Variant is null);
                 var preservedFullBackground = normalized.Operations.Contains("preserved-full-logo-background", StringComparer.Ordinal);
-                var sourceBackedComposition = IsSourceBackedCompleteComposition(record, normalized);
                 var visibleTransparentBrandMark = composition is null
                     && explicitBackground is null
-                    && implicitColor is not null
                     && normalized.RuntimeRgba is not null
                     && RuntimeIconRenderer.HasUsableSurfaceContrast(themeSurface, normalized.RuntimeRgba);
+                if (!preservedFullBackground
+                    && !visibleTransparentBrandMark
+                    && MayContainSourceBackedCompleteComposition(record, normalized)
+                    && normalized.RuntimeRgba is not null
+                    && RuntimeIconRenderer.HasEmbeddedCompositionSilhouette(normalized.RuntimeRgba))
+                {
+                    normalized = normalized with
+                    {
+                        Operations = normalized.Operations.Append("recognized-embedded-composition")
+                            .Distinct(StringComparer.Ordinal)
+                            .OrderBy(operation => operation, StringComparer.Ordinal).ToArray()
+                    };
+                }
+                var sourceBackedComposition = IsSourceBackedCompleteComposition(record, normalized);
                 var complete = preservedFullBackground || sourceBackedComposition || visibleTransparentBrandMark;
-                if (candidate.Variant is not null
-                    && !complete
+                if (candidate.Variant is not null && !complete
                     && normalized.RuntimeRgba is not null
                     && !RuntimeIconRenderer.HasUsableSurfaceContrast(themeSurface, normalized.RuntimeRgba))
                     throw new InputValidationException(
@@ -594,7 +613,9 @@ public sealed class BrandMerger
                     normalized = normalized with
                     {
                         Operations = normalized.Operations
-                            .Append("reviewed-enclosed-matte-composition")
+                            .Append(composition.Mode == RuntimeIconRenderer.SquareFrameComposition
+                                ? "reviewed-square-matte-frame-composition"
+                                : "reviewed-enclosed-matte-composition")
                             .Distinct(StringComparer.Ordinal)
                             .OrderBy(operation => operation, StringComparer.Ordinal).ToArray()
                     };
@@ -658,12 +679,18 @@ public sealed class BrandMerger
         return rank;
     }
 
-    private static bool IsSourceBackedCompleteComposition(
+    private static bool MayContainSourceBackedCompleteComposition(
         SourceRecord record,
         SvgNormalizationResult normalized)
         => (record.Provider.Equals("aegis", StringComparison.OrdinalIgnoreCase)
                 || record.Provider.Equals("dashboard-icons", StringComparison.OrdinalIgnoreCase))
             && normalized.ForegroundColors.Count >= 2;
+
+    private static bool IsSourceBackedCompleteComposition(
+        SourceRecord record,
+        SvgNormalizationResult normalized)
+        => MayContainSourceBackedCompleteComposition(record, normalized)
+            && normalized.Operations.Contains("recognized-embedded-composition", StringComparer.Ordinal);
 
     private static HashSet<string> SourcePaintColors(byte[] svgBytes)
     {
@@ -960,16 +987,19 @@ public sealed class BrandMerger
             bool preserveEmbeddedBackground = false,
             string? implicitFillColor = null,
             bool preferHighResolutionRasterFallback = false,
-            bool useRuntimeVisualProfile = false)
+            bool useRuntimeVisualProfile = false,
+            bool preferFinalSizeTextRaster = false)
         {
             var key = new NormalizationWorkKey(Hash(svg), backgroundColor,
                 materializeImplicitBlackFill, preserveEmbeddedBackground,
-                implicitFillColor, preferHighResolutionRasterFallback, useRuntimeVisualProfile);
+                implicitFillColor, preferHighResolutionRasterFallback, useRuntimeVisualProfile,
+                preferFinalSizeTextRaster);
             if (_normalizations.TryGetValue(key, out var cached)) return cached;
             var normalized = SvgNormalizer.Normalize(svg, backgroundColor,
                 materializeImplicitBlackFill, preserveEmbeddedBackground,
                 implicitFillColor, preferHighResolutionRasterFallback,
-                useRuntimeVisualProfile: useRuntimeVisualProfile);
+                useRuntimeVisualProfile: useRuntimeVisualProfile,
+                preferFinalSizeTextRaster: preferFinalSizeTextRaster);
             _normalizations.Add(key, normalized);
             return normalized;
         }
@@ -990,7 +1020,7 @@ public sealed class BrandMerger
                 ? RuntimeIconRenderer.RenderThemed(normalized.Svg, previewBackground, diagnostic,
                     cancellationToken, visualSourceSvg, normalized.RuntimeRgba)
                 : RuntimeIconRenderer.RenderReviewedBadgeComposition(normalized.Svg,
-                    composition.MatteColor, previewBackground, diagnostic, cancellationToken);
+                    composition.MatteColor, previewBackground, diagnostic, cancellationToken, composition.Mode);
             _renders.Add(key, rendered);
             return rendered;
         }
@@ -1005,7 +1035,8 @@ public sealed class BrandMerger
         bool PreserveEmbeddedBackground,
         string? ImplicitFillColor,
         bool PreferHighResolutionRasterFallback,
-        bool UseRuntimeVisualProfile);
+        bool UseRuntimeVisualProfile,
+        bool PreferFinalSizeTextRaster);
 
     private sealed record RuntimeWorkKey(
         string SvgHash,

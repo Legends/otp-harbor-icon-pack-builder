@@ -15,11 +15,25 @@ are listed explicitly in `mappings/appearance-compositions.json`:
 | Adblock Plus | `simple-icons/adblockplus` | Simple Icons primary red | white | transparent exterior, complete icon |
 | 2K | `simple-icons/2k` | Simple Icons primary red | white | transparent exterior, complete icon |
 | .ENV | `simple-icons/dotenv` | Simple Icons primary yellow | white | transparent exterior, complete icon |
+| Booking.com | `simple-icons/bookingdotcom` | Simple Icons primary blue | white | square white frame, opaque lettering, transparent inset |
+| The Weather Channel | `simple-icons/theweatherchannel` | Simple Icons primary blue | white | square white frame, opaque lettering, transparent inset |
+| 1&1 | `simple-icons/1and1` | Simple Icons primary blue | white | square white frame, opaque lettering, transparent inset |
+| AI Dungeon | `simple-icons/aidungeon` | Simple Icons primary black | white | square white frame, opaque logo/lettering details, transparent inset |
 
 For both application themes, each result is emitted as `complete-icon` with an
-`embedded` background. The builder fills only transparent regions enclosed by
-the reviewed badge geometry. Boundary-connected transparency, including
-antialiased exterior edges, remains transparent.
+`embedded` background. The first five entries use `enclosed-transparent-matte`:
+the builder fills only transparent regions enclosed by the reviewed badge
+geometry. Boundary-connected transparency, including antialiased exterior
+edges, remains transparent.
+
+1&1, AI Dungeon, Booking.com, and The Weather Channel use the explicit builder-only
+`square-badge-matte-frame` mode. Their reviewed square sources retain their
+brand paint and white interior details. The artwork occupies a centered 104-pixel
+square within a four-pixel white frame and the existing eight-pixel transparent
+inset. The frame has sharp corners and is requested builder presentation, not
+claimed official artwork. Geometry checks reject a changed non-square contour;
+they do not authorize adding frames to any other brand. Both themes share the
+same complete PNG. See the [consumer handoff](SQUARE-BADGE-CONSUMER-TRANSFER.md).
 
 ## Catalog audit
 
@@ -31,8 +45,9 @@ that must remain transparent. Even stricter shape thresholds still produced
 hundreds of false positives.
 
 Consequently, topology is insufficient evidence for an opaque interior color.
-Only the five confirmed records above are changed by reviewed matte
-composition. Every
+Only the nine explicitly reviewed records above receive matte composition.
+The original topology audit covered the first five enclosed-matte entries;
+the four square frames are a separate explicit presentation review. Every
 additional candidate requires one of:
 
 - a source-provided complete colored asset;

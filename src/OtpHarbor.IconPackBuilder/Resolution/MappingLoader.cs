@@ -228,7 +228,7 @@ public static class MappingLoader
                 if (CanonicalId.FromName(property.Name) != property.Name)
                     throw new InputValidationException($"Appearance composition ID '{property.Name}' must be lowercase kebab-case.");
                 var mode = RequiredString(property.Value, "mode", path);
-                if (mode != RuntimeIconRenderer.EnclosedMatteComposition)
+                if (mode is not (RuntimeIconRenderer.EnclosedMatteComposition or RuntimeIconRenderer.SquareFrameComposition))
                     throw new InputValidationException($"Appearance composition '{property.Name}' has unsupported mode '{mode}'.");
                 var matteColor = RequiredString(property.Value, "matteColor", path).ToUpperInvariant();
                 if (matteColor.Length != 7 || matteColor[0] != '#'

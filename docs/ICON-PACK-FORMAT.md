@@ -308,7 +308,9 @@ and visual-comparison rules. Its additional rules are:
   is never automatically inverted or recolored for a theme;
 - a Simple Icons primary brand color is foreground paint, not an inferred tile
   background;
-- when that materialized monochrome brand mark has at least 1.25:1 contrast for
+- theme visibility is evaluated against the current OTP Harbor list-tile
+  surfaces: `#FFFFFF` for light theme and `#10213F` for dark theme. When the
+  retained artwork has at least 3:1 contrast for
   at least 90 percent of its nearly opaque pixels against the application theme
   surface, it is a transparent `complete-icon` with `embedded` background mode;
   otherwise it remains `foreground` artwork with a deterministic contrasting
@@ -325,16 +327,27 @@ and visual-comparison rules. Its additional rules are:
 - source artwork with a recognized embedded composition is retained as a
   `complete-icon`; otherwise the result is a transparent `foreground` with a
   deterministic contrast-checked solid background. Recognition requires a
-  large solid source-painted backplate that geometrically contains a later,
-  contrasting detail layer; adjacent multicolor marks and transparent holes
-  alone do not qualify. The source paint and geometry are preserved, so this
-  classification never invents a generic white tile;
+  dense, predominantly connected source-painted silhouette plus multiple
+  retained paints. Sparse wordmarks, disconnected adjacent multicolor marks,
+  and transparent holes alone do not qualify. The source paint and geometry
+  are preserved, so this classification never invents a generic white tile;
+- SVG-default black is materialized for Dashboard and Aegis source artwork
+  before theme classification. This preserves intentional black interior
+  layers instead of replacing omitted `fill` values with the runtime profile's
+  white default;
 - a reviewed badge composition may convert only an explicitly mapped
-  provider/source record into a `complete-icon`. The deterministic operation
-  applies its declared matte color only to fully enclosed transparent regions,
-  retains boundary-connected transparency and antialiased exterior edges, and
-  records `reviewed-badge-composition` as the selection reason. It is never
-  inferred merely because paths contain enclosed transparent regions;
+  provider/source record into a `complete-icon`. The builder-only mode
+  `enclosed-transparent-matte` applies its declared matte color only to fully
+  enclosed transparent regions and retains boundary-connected transparency
+  and antialiased exterior edges. The reviewed `square-badge-matte-frame` mode
+  fits a square source into pixels 12–115 of the 128-pixel canvas, composites
+  its interior over the matte, and adds a four-pixel matte frame at pixels
+  8–119 with sharp corners. The outer eight pixels remain transparent.
+  It rejects artwork without an opaque square contour or distinct brand paint.
+  Both modes record `reviewed-badge-composition` and `complete-icon`/`embedded`;
+  neither is inferred from geometry alone. The frame is builder presentation,
+  not a claim of official brand artwork. Consumers render the complete PNG
+  without adding a frame, tile, rounding, or padding;
 - an unpaired/default foreground that still needs a tile uses a neutral white
   tile in both application themes. A dark tile is used only with
   provider-supplied artwork explicitly intended for the dark application theme.
@@ -356,6 +369,12 @@ and visual-comparison rules. Its additional rules are:
   byte-for-pixel with the packaged PNG. The normalized SVG remains the bounded
   internal geometry/color/background audit artifact and is never packaged. This
   avoids both repeated catalog rendering and any 24-to-128 raster upscale;
+- the reviewed Dashboard Icons 9router source contains rendered SVG text.
+  Its 24-pixel canonical fallback remains the internal source-to-canonical
+  audit, while format 3 captures the source at the final 128-pixel inset
+  geometry for its PNG. Other text sources retain their established path;
+  this scoped correction avoids changing their runtime bytes or introducing
+  font-dependent nondeterminism across the catalog;
 - each appearance is compared on a 40 by 40 preview tile with a centered 24 by
   24 content square. Complete icons use the theme preview surface only for
   verification; it is not added to the PNG.

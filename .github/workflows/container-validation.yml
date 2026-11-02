@@ -9,6 +9,7 @@ on:
       - ".dockerignore"
       - "docker/**"
       - "scripts/testing/Test-GeneratedIconPack.ps1"
+      - "scripts/testing/Test-GeneratedIconPack.Tests.ps1"
       - "src/**"
       - "tests/**"
       - "mappings/**"
@@ -22,6 +23,7 @@ on:
       - ".dockerignore"
       - "docker/**"
       - "scripts/testing/Test-GeneratedIconPack.ps1"
+      - "scripts/testing/Test-GeneratedIconPack.Tests.ps1"
       - "src/**"
       - "tests/**"
       - "mappings/**"
@@ -45,6 +47,9 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v5
+      - name: Test generated pack validator
+        shell: pwsh
+        run: ./scripts/testing/Test-GeneratedIconPack.Tests.ps1
       - name: Build image and run solution tests
         run: >-
           docker build
